@@ -1,7 +1,17 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { handle } from "hono/vercel";
-import { PackageManagerService } from "@/lib/package-services";
+import {
+	ALLOWED_EXTENSIONS,
+	MAX_CONTENT_SIZE,
+	MAX_FILENAME_LENGTH,
+	PACKAGE_NAME_PATTERNS,
+	VALID_REGISTRIES,
+} from "@/lib/constants";
+import {
+	getMultiplePackagesInfo,
+	getPackageInfo,
+} from "@/lib/package-services";
 import { detectFileType, getAllDependencies } from "@/lib/parsers";
 import {
 	PACKAGE_STATUS,
@@ -62,9 +72,6 @@ app.get("/analyze-packages", (c) => {
 });
 
 // --- Analyze Packages (POST) ---
-const MAX_CONTENT_SIZE = 5 * 1024 * 1024;
-const MAX_FILENAME_LENGTH = 255;
-const ALLOWED_EXTENSIONS = [".json", ".txt", ".yaml", ".yml"];
 
 function sanitizeFileName(fileName: string): string {
 	return fileName.replace(/[/\\]/g, "").trim();
@@ -133,8 +140,7 @@ app.post("/analyze-packages", async (c) => {
 			name,
 			manager: packageData.packageManager,
 		}));
-		const packageInfos =
-			await PackageManagerService.getMultiplePackagesInfo(packagesToCheck);
+		const packageInfos = await getMultiplePackagesInfo(packagesToCheck);
 
 		const packages: PackageInfo[] = packageInfos.map((info, index) => {
 			const packageName = packageNames[index];
@@ -200,20 +206,6 @@ app.post("/analyze-packages", async (c) => {
 });
 
 // --- Single Package Lookup ---
-const VALID_REGISTRIES: Record<string, PackageManager> = {
-	npm: "npm",
-	pip: "pip",
-	pypi: "pip",
-	pub: "pub",
-	dart: "pub",
-	flutter: "pub",
-};
-
-const PACKAGE_NAME_PATTERNS: Record<PackageManager, RegExp> = {
-	npm: /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i,
-	pip: /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/,
-	pub: /^[a-z][a-z0-9_]*$/,
-};
 
 function getRegistryUrl(name: string, registry: PackageManager): string {
 	switch (registry) {
@@ -256,10 +248,7 @@ app.get("/package/:registry/:name", async (c) => {
 	}
 
 	try {
-		const info = await PackageManagerService.getPackageInfo(
-			decodedName,
-			packageManager,
-		);
+		const info = await getPackageInfo(decodedName, packageManager);
 
 		if (info.error === "Package not found") {
 			return c.json(
