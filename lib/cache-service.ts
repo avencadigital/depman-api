@@ -19,7 +19,7 @@ export class CacheService {
 	private static instance: CacheService;
 	private cache: Map<string, CacheEntry> = new Map();
 	private readonly DEFAULT_TTL = 5 * 60 * 1000;
-	private readonly ERROR_TTL = 2 * 60 * 1000;
+	private readonly ERROR_TTL = 30 * 1000;
 	private readonly MAX_CACHE_SIZE = 500;
 	private readonly CLEANUP_INTERVAL = 60 * 1000;
 	private cleanupTimer?: ReturnType<typeof setInterval>;

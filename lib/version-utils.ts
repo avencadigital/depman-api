@@ -4,7 +4,7 @@ import { PACKAGE_STATUS, type PackageStatus, type VersionDiff } from "./types";
 export function cleanVersion(version: string): string {
 	return version
 		.replace(/[\^~>=<]/g, "")
-		.replace(/v/gi, "")
+		.replace(/^v/i, "")
 		.trim();
 }
 

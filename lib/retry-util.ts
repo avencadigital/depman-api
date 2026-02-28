@@ -4,8 +4,8 @@ export interface RetryOptions {
 	maxDelay?: number;
 	backoffFactor?: number;
 	useJitter?: boolean;
-	shouldRetry?: (error: any, attempt: number) => boolean;
-	onRetry?: (error: any, attempt: number, delay: number) => void;
+	shouldRetry?: (error: unknown, attempt: number) => boolean;
+	onRetry?: (error: unknown, attempt: number, delay: number) => void;
 }
 
 const DEFAULT_OPTIONS: Required<RetryOptions> = {
@@ -35,15 +35,20 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function isRetryableError(error: any): boolean {
+export function isRetryableError(error: unknown): boolean {
 	if (!error) return false;
-	if (error.name === "AbortError") return false;
-	if (error.name === "TypeError" && error.message.includes("fetch"))
-		return true;
+	if (error instanceof Error) {
+		if (error.name === "AbortError") return false;
+		if (error.name === "TypeError" && error.message.includes("fetch"))
+			return true;
+	}
+	const err = error as Record<string, unknown>;
 	const retryableStatuses = [408, 429, 500, 502, 503, 504];
-	if (error.status) return retryableStatuses.includes(error.status);
-	if (error.response?.status)
-		return retryableStatuses.includes(error.response.status);
+	if (typeof err.status === "number")
+		return retryableStatuses.includes(err.status);
+	const response = err.response as Record<string, unknown> | undefined;
+	if (typeof response?.status === "number")
+		return retryableStatuses.includes(response.status);
 	return false;
 }
 
@@ -52,7 +57,7 @@ export async function retryWithBackoff<T>(
 	options: RetryOptions = {},
 ): Promise<T> {
 	const opts = { ...DEFAULT_OPTIONS, ...options };
-	let lastError: any;
+	let lastError: unknown;
 
 	for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
 		try {

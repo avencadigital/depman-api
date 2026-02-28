@@ -32,7 +32,7 @@ app.get("/health", (c) => c.json({ message: "Good!" }));
 // --- API Info (GET /api/analyze-packages) ---
 app.get("/analyze-packages", (c) => {
 	return c.json({
-		name: "PackMan - Package Analyzer API",
+		name: "Dep-Man — Dependency Manager API",
 		version: "0.2.0",
 		status: "operational",
 		description:

@@ -17,13 +17,12 @@
 		"semver": "^7.7.4"
 	},
 	"devDependencies": {
-		"@eslint/eslintrc": "3.3.4",
 		"@types/js-yaml": "^4.0.9",
 		"@types/node": "25.3.2",
 		"@types/react": "19.2.14",
 		"@types/react-dom": "19.2.3",
 		"@types/semver": "^7.7.1",
-		"eslint": "10.0.2",
+		"eslint": "^9.39.3",
 		"eslint-config-next": "16.1.6",
 		"typescript": "5.9.3"
 	}
