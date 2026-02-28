@@ -1,0 +1,28 @@
+{
+	"name": "depman-api",
+	"type": "module",
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"lint": "eslint"
+	},
+	"dependencies": {
+		"hono": "^4.12.3",
+		"next": "16.1.6",
+		"p-limit": "7.3.0",
+		"react": "19.2.4",
+		"react-dom": "19.2.4",
+		"semver": "^7.7.4"
+	},
+	"devDependencies": {
+		"@eslint/eslintrc": "3.3.4",
+		"@types/node": "25.3.2",
+		"@types/react": "19.2.14",
+		"@types/react-dom": "19.2.3",
+		"@types/semver": "^7.7.1",
+		"eslint": "10.0.2",
+		"eslint-config-next": "16.1.6",
+		"typescript": "5.9.3"
+	}
+}
