@@ -1,3 +1,4 @@
+import yaml from "js-yaml";
 import type { DependencyParser, FileKind, ParsedDependencies } from "./types";
 
 class PackageJsonParser implements DependencyParser {
@@ -120,88 +121,32 @@ class PubspecParser implements DependencyParser {
 	}
 
 	parse(content: string): ParsedDependencies {
-		const dependencies: Record<string, string> = {};
-		const devDependencies: Record<string, string> = {};
-		const lines = content.split("\n");
-		let currentSection: "dependencies" | "dev_dependencies" | null = null;
-		let indentLevel = 0;
-		let skipNextLine = false;
-
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			const trimmed = line.trim();
-			if (skipNextLine) {
-				if (trimmed.startsWith("sdk:")) {
-					skipNextLine = false;
-					continue;
-				}
-				skipNextLine = false;
-			}
-			const currentIndent = line.length - line.trimStart().length;
-
-			if (trimmed === "dependencies:") {
-				currentSection = "dependencies";
-				indentLevel = currentIndent;
-				continue;
-			} else if (trimmed === "dev_dependencies:") {
-				currentSection = "dev_dependencies";
-				indentLevel = currentIndent;
-				continue;
-			} else if (
-				trimmed &&
-				!line.startsWith(" ".repeat(indentLevel + 2)) &&
-				currentSection
-			) {
-				if (currentIndent <= indentLevel) {
-					currentSection = null;
-					continue;
-				}
-			}
-
-			if (currentSection && trimmed && currentIndent > indentLevel) {
-				const match = trimmed.match(/^([^:]+):\s*(.*)$/);
-				if (match) {
-					const [, name, versionPart] = match;
-					const packageName = name.trim();
-					if (packageName === "flutter" || packageName === "flutter_test") {
-						if (
-							i + 1 < lines.length &&
-							lines[i + 1].trim().startsWith("sdk:")
-						) {
-							skipNextLine = true;
-							continue;
-						}
-						if (!versionPart || versionPart === "") {
-							skipNextLine = true;
-							continue;
-						}
-					}
-					if (packageName === "sdk" && versionPart === "flutter") continue;
-
-					let version = versionPart.trim();
-					if (!version || version === "") {
-						if (i + 1 < lines.length) {
-							const nextLine = lines[i + 1].trim();
-							const nextIndent =
-								lines[i + 1].length - lines[i + 1].trimStart().length;
-							if (nextIndent > currentIndent) {
-								skipNextLine = true;
-								continue;
-							}
-							version = nextLine.startsWith("version:")
-								? nextLine.replace("version:", "").trim()
-								: "any";
-						} else {
-							version = "any";
-						}
-					}
-					version = version.replace(/["']/g, "");
-					if (currentSection === "dependencies")
-						dependencies[packageName] = version;
-					else devDependencies[packageName] = version;
-				}
-			}
+		let doc: Record<string, unknown>;
+		try {
+			doc = yaml.load(content) as Record<string, unknown>;
+		} catch (error) {
+			throw new Error(
+				`Failed to parse pubspec.yaml: ${error instanceof Error ? error.message : "Unknown error"}`,
+			);
 		}
+
+		const extractDeps = (section: unknown): Record<string, string> => {
+			if (!section || typeof section !== "object") return {};
+			const deps: Record<string, string> = {};
+			for (const [name, value] of Object.entries(
+				section as Record<string, unknown>,
+			)) {
+				if (name === "flutter" || name === "flutter_test") continue;
+				if (typeof value === "string") deps[name] = value;
+				else if (value === null || value === undefined) deps[name] = "any";
+				// skip git/path/sdk dependencies (objects)
+			}
+			return deps;
+		};
+
+		const dependencies = extractDeps(doc.dependencies);
+		const devDependencies = extractDeps(doc.dev_dependencies);
+
 		return {
 			kind: this.getFileType(),
 			dependencies,
