@@ -1,5 +1,14 @@
 import type { PackageVersionInfo } from "./types";
 
+interface CacheStats {
+	totalEntries: number;
+	validEntries: number;
+	expiredEntries: number;
+	errorEntries: number;
+	successEntries: number;
+	maxSize: number;
+}
+
 interface CacheEntry {
 	data: PackageVersionInfo;
 	timestamp: number;
@@ -57,7 +66,7 @@ export class CacheService {
 		this.cache.clear();
 	}
 
-	getStats() {
+	getStats(): CacheStats {
 		const now = Date.now();
 		let validEntries = 0,
 			expiredEntries = 0,

@@ -76,6 +76,21 @@ app.get("/analyze-packages", (c) => {
 function sanitizeFileName(fileName: string): string {
 	return fileName.replace(/[/\\]/g, "").trim();
 }
+function buildPackageMetadata(info: {
+	license?: string;
+	repository?: string;
+	deprecated?: string | boolean;
+	lastPublished?: string;
+	keywords?: string[];
+}): PackageMetadata | undefined {
+	const metadata: PackageMetadata = {};
+	if (info.license) metadata.license = info.license;
+	if (info.repository) metadata.repository = info.repository;
+	if (info.deprecated) metadata.deprecated = info.deprecated;
+	if (info.lastPublished) metadata.lastPublished = info.lastPublished;
+	if (info.keywords?.length) metadata.keywords = info.keywords;
+	return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
 
 function hasValidExtension(fileName: string): boolean {
 	return ALLOWED_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
@@ -145,13 +160,7 @@ app.post("/analyze-packages", async (c) => {
 		const packages: PackageInfo[] = packageInfos.map((info, index) => {
 			const packageName = packageNames[index];
 			const currentVersion = allDependencies[packageName];
-
-			const metadata: PackageMetadata = {};
-			if (info.license) metadata.license = info.license;
-			if (info.repository) metadata.repository = info.repository;
-			if (info.deprecated) metadata.deprecated = info.deprecated;
-			if (info.lastPublished) metadata.lastPublished = info.lastPublished;
-			if (info.keywords?.length) metadata.keywords = info.keywords;
+			const metadata = buildPackageMetadata(info);
 
 			if (info.error) {
 				return {
@@ -161,7 +170,7 @@ app.post("/analyze-packages", async (c) => {
 					status: PACKAGE_STATUS.ERROR,
 					packageManager: packageData.packageManager,
 					error: info.error,
-					metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+					metadata,
 				};
 			}
 
@@ -180,7 +189,7 @@ app.post("/analyze-packages", async (c) => {
 				description: info.description,
 				homepage: info.homepage,
 				versionDiff,
-				metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+				metadata,
 			};
 		});
 
@@ -271,13 +280,8 @@ app.get("/package/:registry/:name", async (c) => {
 			checkedAt: new Date().toISOString(),
 		};
 
-		const metadata: Record<string, unknown> = {};
-		if (info.license) metadata.license = info.license;
-		if (info.repository) metadata.repository = info.repository;
-		if (info.deprecated) metadata.deprecated = info.deprecated;
-		if (info.lastPublished) metadata.lastPublished = info.lastPublished;
-		if (info.keywords?.length) metadata.keywords = info.keywords;
-		if (Object.keys(metadata).length > 0) response.metadata = metadata;
+		const metadata = buildPackageMetadata(info);
+		if (metadata) response.metadata = metadata;
 
 		if (currentVersion) {
 			response.currentVersion = currentVersion;

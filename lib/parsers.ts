@@ -58,17 +58,9 @@ class RequirementsParser implements DependencyParser {
 			.split("\n")
 			.filter((line) => line.trim() && !line.trim().startsWith("#"));
 		if (lines.length === 0 && content.trim()) lines.push(content.trim());
-		const pipPatterns = [
-			/^[\w-]+==\d+[.\d]*/,
-			/^[\w-]+>=\d+[.\d]*/,
-			/^[\w-]+~=\d+[.\d]*/,
-			/^[\w-]+\[[\w,]+\]/,
-			/^-e\s+/,
-			/^git\+/,
-		];
-		return lines.some((line) =>
-			pipPatterns.some((pattern) => pattern.test(line.trim())),
-		);
+		const pipPattern =
+			/^(?:[\w-]+(?:==|>=|~=)\d+[.\d]*|[\w-]+\[[\w,]+\]|-e\s+|git\+)/;
+		return lines.some((line) => pipPattern.test(line.trim()));
 	}
 
 	parse(content: string): ParsedDependencies {
