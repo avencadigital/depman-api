@@ -21,12 +21,7 @@ export class CacheService {
 	private readonly DEFAULT_TTL = 5 * 60 * 1000;
 	private readonly ERROR_TTL = 30 * 1000;
 	private readonly MAX_CACHE_SIZE = 500;
-	private readonly CLEANUP_INTERVAL = 60 * 1000;
-	private cleanupTimer?: ReturnType<typeof setInterval>;
-
-	private constructor() {
-		this.startCleanupTimer();
-	}
+	private constructor() {}
 
 	static getInstance(): CacheService {
 		if (!CacheService.instance) {
@@ -99,18 +94,12 @@ export class CacheService {
 
 	private enforceSizeLimit(): void {
 		if (this.cache.size <= this.MAX_CACHE_SIZE) return;
+		this.cleanup();
+		if (this.cache.size <= this.MAX_CACHE_SIZE) return;
 		const entries = Array.from(this.cache.entries()).sort(
 			(a, b) => a[1].timestamp - b[1].timestamp,
 		);
 		const toRemove = this.cache.size - this.MAX_CACHE_SIZE;
 		for (let i = 0; i < toRemove; i++) this.cache.delete(entries[i][0]);
-	}
-
-	private startCleanupTimer(): void {
-		this.cleanupTimer = setInterval(
-			() => this.cleanup(),
-			this.CLEANUP_INTERVAL,
-		);
-		if (this.cleanupTimer.unref) this.cleanupTimer.unref();
 	}
 }

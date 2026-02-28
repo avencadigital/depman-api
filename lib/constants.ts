@@ -28,8 +28,36 @@ export const VALID_REGISTRIES: Record<string, PackageManager> = {
 	flutter: "pub",
 };
 
+export const MAX_PACKAGE_NAME_LENGTH: Record<PackageManager, number> = {
+	npm: 214,
+	pip: 128,
+	pub: 64,
+};
+
 export const PACKAGE_NAME_PATTERNS: Record<PackageManager, RegExp> = {
 	npm: /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i,
 	pip: /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/,
 	pub: /^[a-z][a-z0-9_]*$/,
+};
+
+// ---------------------------------------------------------------------------
+// Registry URLs (single source of truth)
+// ---------------------------------------------------------------------------
+
+export const REGISTRY_API_URLS: Record<
+	PackageManager,
+	(name: string) => string
+> = {
+	npm: (name) => `https://registry.npmjs.org/${name}`,
+	pip: (name) => `https://pypi.org/pypi/${name}/json`,
+	pub: (name) => `https://pub.dev/api/packages/${name}`,
+};
+
+export const REGISTRY_WEB_URLS: Record<
+	PackageManager,
+	(name: string) => string
+> = {
+	npm: (name) => `https://www.npmjs.com/package/${name}`,
+	pip: (name) => `https://pypi.org/project/${name}/`,
+	pub: (name) => `https://pub.dev/packages/${name}`,
 };

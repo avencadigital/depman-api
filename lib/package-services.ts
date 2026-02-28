@@ -1,6 +1,10 @@
 import pLimit from "p-limit";
 import { CacheService } from "./cache-service";
-import { DEFAULT_TIMEOUT, MAX_CONCURRENT_REQUESTS } from "./constants";
+import {
+	DEFAULT_TIMEOUT,
+	MAX_CONCURRENT_REQUESTS,
+	REGISTRY_API_URLS,
+} from "./constants";
 import { RetryPresets, retryWithBackoff } from "./retry-util";
 import type { PackageVersionInfo } from "./types";
 
@@ -100,93 +104,122 @@ async function fetchFromRegistry(
 }
 
 // ---------------------------------------------------------------------------
+// Type-safe accessors for unknown registry response data
+// ---------------------------------------------------------------------------
+
+function asString(value: unknown): string | undefined {
+	return typeof value === "string" ? value : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	return value.every((v) => typeof v === "string")
+		? (value as string[])
+		: undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Registry-specific configurations (URL + response mapper only)
 // ---------------------------------------------------------------------------
 
 const npmConfig: RegistryConfig = {
 	cacheKey: "npm",
-	buildUrl: (name) => `https://registry.npmjs.org/${name}`,
+	buildUrl: REGISTRY_API_URLS.npm,
 	mapResponse: (name, raw) => {
-		const data = raw as Record<string, unknown>;
-		const distTags = data["dist-tags"] as Record<string, string> | undefined;
-		const latestVersion = distTags?.latest || "unknown";
-		const versions = data.versions as
-			| Record<string, Record<string, unknown>>
-			| undefined;
-		const latestVersionData = versions?.[latestVersion] || {};
-		const timeData = (data.time as Record<string, string>) || {};
-		const repo = data.repository as { url?: string } | string | undefined;
+		const data = asRecord(raw) ?? {};
+		const distTags = asRecord(data["dist-tags"]);
+		const latestVersion = asString(distTags?.latest) ?? "unknown";
+		const versions = asRecord(data.versions);
+		const latestVersionData = asRecord(versions?.[latestVersion]) ?? {};
+		const timeData = asRecord(data.time) ?? {};
+
+		const deprecated = latestVersionData.deprecated ?? data.deprecated;
 
 		return {
 			name,
 			latestVersion,
-			description: data.description as string | undefined,
+			description: asString(data.description),
 			homepage:
-				(data.homepage as string) ||
-				(typeof repo === "object" && repo?.url
-					? repo.url.replace(/^git\+/, "").replace(/\.git$/, "")
+				asString(data.homepage) ||
+				(typeof data.repository === "object" && data.repository !== null
+					? asString((data.repository as Record<string, unknown>).url)
+							?.replace(/^git\+/, "")
+							.replace(/\.git$/, "")
 					: undefined),
 			license:
 				typeof data.license === "string"
 					? data.license
-					: (data.license as { type?: string })?.type,
+					: asString(asRecord(data.license)?.type),
 			repository: extractRepoUrl(data.repository),
 			deprecated:
-				(latestVersionData.deprecated as string | undefined) ||
-				(data.deprecated as string | boolean | undefined),
-			lastPublished: timeData[latestVersion] || timeData.modified,
-			keywords: (data.keywords as string[] | undefined)?.slice(0, 10),
+				typeof deprecated === "string" || typeof deprecated === "boolean"
+					? deprecated
+					: undefined,
+			lastPublished:
+				asString(timeData[latestVersion]) || asString(timeData.modified),
+			keywords: asStringArray(data.keywords)?.slice(0, 10),
 		};
 	},
 };
 
 const pypiConfig: RegistryConfig = {
 	cacheKey: "pip",
-	buildUrl: (name) => `https://pypi.org/pypi/${name}/json`,
+	buildUrl: REGISTRY_API_URLS.pip,
 	mapResponse: (name, raw) => {
-		const data = raw as Record<string, unknown>;
-		const info = data.info as Record<string, unknown>;
-		const releases =
-			(data.releases as Record<string, Array<Record<string, unknown>>>) || {};
-		const latestRelease = releases[info.version as string]?.[0];
-		const projectUrls = info.project_urls as Record<string, string> | undefined;
+		const data = asRecord(raw) ?? {};
+		const info = asRecord(data.info) ?? {};
+		const releases = asRecord(data.releases) ?? {};
+		const version = asString(info.version);
+		const releaseList = version ? releases[version] : undefined;
+		const latestRelease = Array.isArray(releaseList) && releaseList.length > 0
+			? asRecord(releaseList.at(-1))
+			: undefined;
+		const projectUrls = asRecord(info.project_urls);
 
 		return {
 			name,
-			latestVersion: (info.version as string) || "unknown",
-			description: info.summary as string | undefined,
+			latestVersion: version ?? "unknown",
+			description: asString(info.summary),
 			homepage:
-				(info.home_page as string) ||
-				projectUrls?.Homepage ||
-				projectUrls?.homepage,
-			license: info.license as string | undefined,
+				asString(info.home_page) ||
+				asString(projectUrls?.Homepage) ||
+				asString(projectUrls?.homepage),
+			license: asString(info.license),
 			repository:
-				projectUrls?.Repository || projectUrls?.Source || projectUrls?.GitHub,
+				asString(projectUrls?.Repository) ||
+				asString(projectUrls?.Source) ||
+				asString(projectUrls?.GitHub),
 			lastPublished:
-				(latestRelease?.upload_time_iso_8601 as string) ||
-				(latestRelease?.upload_time as string),
-			keywords: (info.keywords as string[] | undefined)?.slice(0, 10),
+				asString(latestRelease?.upload_time_iso_8601) ||
+				asString(latestRelease?.upload_time),
+			keywords: asStringArray(info.keywords)?.slice(0, 10),
 		};
 	},
 };
 
 const pubConfig: RegistryConfig = {
 	cacheKey: "pub",
-	buildUrl: (name) => `https://pub.dev/api/packages/${name}`,
+	buildUrl: REGISTRY_API_URLS.pub,
 	mapResponse: (name, raw) => {
-		const data = raw as Record<string, unknown>;
-		const latest = data.latest as Record<string, unknown> | undefined;
-		const pubspec = (latest?.pubspec as Record<string, unknown>) || {};
+		const data = asRecord(raw) ?? {};
+		const latest = asRecord(data.latest) ?? {};
+		const pubspec = asRecord(latest.pubspec) ?? {};
 
 		return {
 			name,
-			latestVersion: (latest?.version as string) || "unknown",
-			description: pubspec.description as string | undefined,
-			homepage: (pubspec.homepage as string) || (pubspec.repository as string),
+			latestVersion: asString(latest.version) ?? "unknown",
+			description: asString(pubspec.description),
+			homepage: asString(pubspec.homepage) || asString(pubspec.repository),
 			repository:
-				(pubspec.repository as string) || (pubspec.issue_tracker as string),
-			lastPublished: latest?.published as string | undefined,
-			keywords: (pubspec.topics as string[] | undefined)?.slice(0, 10),
+				asString(pubspec.repository) || asString(pubspec.issue_tracker),
+			lastPublished: asString(latest.published),
+			keywords: asStringArray(pubspec.topics)?.slice(0, 10),
 		};
 	},
 };

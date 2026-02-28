@@ -38,7 +38,7 @@ function sleep(ms: number): Promise<void> {
 export function isRetryableError(error: unknown): boolean {
 	if (!error) return false;
 	if (error instanceof Error) {
-		if (error.name === "AbortError") return false;
+		if (error.name === "AbortError") return true;
 		if (error.name === "TypeError" && error.message.includes("fetch"))
 			return true;
 	}

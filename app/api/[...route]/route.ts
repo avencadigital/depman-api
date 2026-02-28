@@ -5,7 +5,9 @@ import {
 	ALLOWED_EXTENSIONS,
 	MAX_CONTENT_SIZE,
 	MAX_FILENAME_LENGTH,
+	MAX_PACKAGE_NAME_LENGTH,
 	PACKAGE_NAME_PATTERNS,
+	REGISTRY_WEB_URLS,
 	VALID_REGISTRIES,
 } from "@/lib/constants";
 import {
@@ -16,7 +18,6 @@ import { detectFileType, getAllDependencies } from "@/lib/parsers";
 import {
 	PACKAGE_STATUS,
 	type PackageInfo,
-	type PackageManager,
 	type PackageMetadata,
 } from "@/lib/types";
 import { calculateVersionDiff, compareVersions } from "@/lib/version-utils";
@@ -74,7 +75,15 @@ app.get("/analyze-packages", (c) => {
 // --- Analyze Packages (POST) ---
 
 function sanitizeFileName(fileName: string): string {
-	return fileName.replace(/[/\\]/g, "").trim();
+	return Array.from(fileName)
+		.filter((ch) => {
+			const code = ch.codePointAt(0) ?? 0;
+			if (code <= 0x1f || code === 0x7f) return false;
+			if (ch === "/" || ch === "\\") return false;
+			return true;
+		})
+		.join("")
+		.trim();
 }
 function buildPackageMetadata(info: {
 	license?: string;
@@ -94,6 +103,19 @@ function buildPackageMetadata(info: {
 
 function hasValidExtension(fileName: string): boolean {
 	return ALLOWED_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
+}
+function handleServerError(
+	c: { json: (data: unknown, status: number) => Response },
+	error: unknown,
+	context: string,
+) {
+	if (process.env.NODE_ENV === "development")
+		console.error(`${context}:`, error);
+	const message =
+		process.env.NODE_ENV === "development" && error instanceof Error
+			? error.message
+			: "Internal server error";
+	return c.json({ error: message }, 500);
 }
 
 app.post("/analyze-packages", async (c) => {
@@ -156,9 +178,14 @@ app.post("/analyze-packages", async (c) => {
 			manager: packageData.packageManager,
 		}));
 		const packageInfos = await getMultiplePackagesInfo(packagesToCheck);
+		const infoByName = new Map(packageInfos.map((info) => [info.name, info]));
 
-		const packages: PackageInfo[] = packageInfos.map((info, index) => {
-			const packageName = packageNames[index];
+		const packages: PackageInfo[] = packageNames.map((packageName) => {
+			const info = infoByName.get(packageName) ?? {
+				name: packageName,
+				latestVersion: "unknown",
+				error: "No data returned",
+			};
 			const currentVersion = allDependencies[packageName];
 			const metadata = buildPackageMetadata(info);
 
@@ -204,28 +231,11 @@ app.post("/analyze-packages", async (c) => {
 
 		return c.json({ packages, summary });
 	} catch (error) {
-		if (process.env.NODE_ENV === "development")
-			console.error("Error in analyze-packages API:", error);
-		const errorMessage =
-			process.env.NODE_ENV === "development" && error instanceof Error
-				? error.message
-				: "Internal server error";
-		return c.json({ error: errorMessage }, 500);
+		return handleServerError(c, error, "Error in analyze-packages API");
 	}
 });
 
 // --- Single Package Lookup ---
-
-function getRegistryUrl(name: string, registry: PackageManager): string {
-	switch (registry) {
-		case "npm":
-			return `https://www.npmjs.com/package/${name}`;
-		case "pip":
-			return `https://pypi.org/project/${name}/`;
-		case "pub":
-			return `https://pub.dev/packages/${name}`;
-	}
-}
 
 app.get("/package/:registry/:name", async (c) => {
 	const registry = c.req.param("registry");
@@ -244,7 +254,8 @@ app.get("/package/:registry/:name", async (c) => {
 	}
 
 	const decodedName = decodeURIComponent(name);
-	if (!decodedName || decodedName.length > 214) {
+	const maxNameLength = MAX_PACKAGE_NAME_LENGTH[packageManager];
+	if (!decodedName || decodedName.length > maxNameLength) {
 		return c.json({ error: "Invalid package name" }, 400);
 	}
 
@@ -276,7 +287,7 @@ app.get("/package/:registry/:name", async (c) => {
 			latestVersion: info.latestVersion,
 			description: info.description,
 			homepage: info.homepage,
-			registryUrl: getRegistryUrl(decodedName, packageManager),
+			registryUrl: REGISTRY_WEB_URLS[packageManager](decodedName),
 			checkedAt: new Date().toISOString(),
 		};
 
@@ -307,9 +318,7 @@ app.get("/package/:registry/:name", async (c) => {
 		);
 		return c.json(response);
 	} catch (error) {
-		if (process.env.NODE_ENV === "development")
-			console.error("Error fetching package info:", error);
-		return c.json({ error: "Failed to fetch package information" }, 500);
+		return handleServerError(c, error, "Error fetching package info");
 	}
 });
 
