@@ -177,9 +177,10 @@ const pypiConfig: RegistryConfig = {
 		const releases = asRecord(data.releases) ?? {};
 		const version = asString(info.version);
 		const releaseList = version ? releases[version] : undefined;
-		const latestRelease = Array.isArray(releaseList) && releaseList.length > 0
-			? asRecord(releaseList.at(-1))
-			: undefined;
+		const latestRelease =
+			Array.isArray(releaseList) && releaseList.length > 0
+				? asRecord(releaseList.at(-1))
+				: undefined;
 		const projectUrls = asRecord(info.project_urls);
 
 		return {

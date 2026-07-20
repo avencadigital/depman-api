@@ -8,13 +8,13 @@
 
 ## Alto
 
-- [ ] **tsconfig: `moduleResolution`** — Atualmente `"node"`, deveria ser `"bundler"` para Next.js 16 com `"type": "module"`. Permite resolução correta de `exports` em packages modernos.
+- [x] **tsconfig: `moduleResolution`** — Atualmente `"node"`, deveria ser `"bundler"` para Next.js 16 com `"type": "module"`. Permite resolução correta de `exports` em packages modernos.
 
-- [ ] **tsconfig: `jsx`** — Atualmente `"react-jsx"`, deveria ser `"preserve"`. O Next.js/Turbopack cuida da transformação JSX; usar `react-jsx` pode causar conflitos.
+- [x] **tsconfig: `jsx`** — Atualmente `"react-jsx"`, deveria ser `"preserve"`. O Next.js/Turbopack cuida da transformação JSX; usar `react-jsx` pode causar conflitos.
 
 - [x] **Type assertions sem validação no NPM service** — `package-services.ts:109-140`. `data["dist-tags"]`, `data.versions` e `data.time` são acessados com `as` sem verificar a estrutura real. Respostas malformadas do registry causam falhas silenciosas. Considerar validação com Zod.
 
-- [ ] **Cache in-memory em serverless** — `CacheService` usa Singleton com `setInterval` para cleanup. Em serverless (Vercel Functions), o cache não persiste entre cold starts e o timer pode manter a function viva. Considerar Vercel KV ou Edge Config para cache distribuído.
+- [ ] **Cache in-memory em serverless** — `CacheService` já faz cleanup lazy (sem `setInterval`, diferente da API Next.js que ainda usa timer). Ponto que falta é maior: em serverless (Vercel Functions), o Map não persiste entre cold starts — limitação que a API Next.js também tem hoje. Migrar para Vercel KV/Edge Config é uma decisão de infra maior, não tratada nesta rodada; ambas as APIs compartilham essa limitação por enquanto.
 
 ## Médio
 
