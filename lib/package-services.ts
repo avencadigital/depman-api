@@ -1,11 +1,16 @@
 import pLimit from "p-limit";
 import { CacheService } from "./cache-service";
 import {
+	BATCH_TIMEOUT,
 	DEFAULT_TIMEOUT,
 	MAX_CONCURRENT_REQUESTS,
 	REGISTRY_API_URLS,
 } from "./constants";
-import { RetryPresets, retryWithBackoff } from "./retry-util";
+import {
+	RetryPresets,
+	type RetryOptions,
+	retryWithBackoff,
+} from "./retry-util";
 import type { PackageVersionInfo } from "./types";
 
 const cache = CacheService.getInstance();
@@ -43,6 +48,30 @@ async function fetchWithTimeout(
 	}
 }
 
+class HttpStatusError extends Error {
+	status: number;
+	constructor(status: number) {
+		super(`HTTP error! status: ${status}`);
+		this.name = "HttpStatusError";
+		this.status = status;
+	}
+}
+
+async function fetchAndValidate(
+	url: string,
+	timeout?: number,
+): Promise<Response> {
+	const response = await fetchWithTimeout(
+		url,
+		{ headers: { Accept: "application/json" } },
+		timeout,
+	);
+	if (!response.ok && response.status !== 404) {
+		throw new HttpStatusError(response.status);
+	}
+	return response;
+}
+
 // ---------------------------------------------------------------------------
 // Generic registry fetcher – eliminates duplicated cache/fetch/error logic
 // ---------------------------------------------------------------------------
@@ -55,31 +84,33 @@ interface RegistryConfig {
 	mapResponse: (packageName: string, data: unknown) => PackageVersionInfo;
 }
 
+interface FetchOptions {
+	timeout?: number;
+	retry?: RetryOptions;
+}
+
 async function fetchFromRegistry(
 	packageName: string,
 	config: RegistryConfig,
+	options: FetchOptions = {},
 ): Promise<PackageVersionInfo> {
 	const cached = cache.get(packageName, config.cacheKey);
 	if (cached) return cached;
 
 	try {
 		const response = await retryWithBackoff(
-			() =>
-				fetchWithTimeout(config.buildUrl(packageName), {
-					headers: { Accept: "application/json" },
-				}),
-			{ ...RetryPresets.standard },
+			() => fetchAndValidate(config.buildUrl(packageName), options.timeout),
+			{ ...RetryPresets.standard, ...options.retry },
 		);
 
-		if (!response.ok) {
-			if (response.status === 404) {
-				return {
-					name: packageName,
-					latestVersion: "unknown",
-					error: "Package not found",
-				};
-			}
-			throw new Error(`HTTP error! status: ${response.status}`);
+		if (response.status === 404) {
+			const result: PackageVersionInfo = {
+				name: packageName,
+				latestVersion: "unknown",
+				error: "Package not found",
+			};
+			cache.set(packageName, config.cacheKey, result);
+			return result;
 		}
 
 		const data = await response.json();
@@ -124,6 +155,17 @@ function asStringArray(value: unknown): string[] | undefined {
 		: undefined;
 }
 
+// PyPI reports `keywords` as a single comma-separated string, not an array.
+function asKeywordList(value: unknown): string[] | undefined {
+	if (Array.isArray(value)) return asStringArray(value);
+	if (typeof value !== "string") return undefined;
+	const keywords = value
+		.split(",")
+		.map((keyword) => keyword.trim())
+		.filter(Boolean);
+	return keywords.length > 0 ? keywords : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Registry-specific configurations (URL + response mapper only)
 // ---------------------------------------------------------------------------
@@ -145,13 +187,7 @@ const npmConfig: RegistryConfig = {
 			name,
 			latestVersion,
 			description: asString(data.description),
-			homepage:
-				asString(data.homepage) ||
-				(typeof data.repository === "object" && data.repository !== null
-					? asString((data.repository as Record<string, unknown>).url)
-							?.replace(/^git\+/, "")
-							.replace(/\.git$/, "")
-					: undefined),
+			homepage: asString(data.homepage) || extractRepoUrl(data.repository),
 			license:
 				typeof data.license === "string"
 					? data.license
@@ -199,7 +235,7 @@ const pypiConfig: RegistryConfig = {
 			lastPublished:
 				asString(latestRelease?.upload_time_iso_8601) ||
 				asString(latestRelease?.upload_time),
-			keywords: asStringArray(info.keywords)?.slice(0, 10),
+			keywords: asKeywordList(info.keywords)?.slice(0, 10),
 		};
 	},
 };
@@ -238,6 +274,7 @@ const registryConfigs: Record<RegistryName, RegistryConfig> = {
 export function getPackageInfo(
 	packageName: string,
 	packageManager: RegistryName,
+	options?: FetchOptions,
 ): Promise<PackageVersionInfo> {
 	const config = registryConfigs[packageManager];
 	if (!config) {
@@ -247,14 +284,20 @@ export function getPackageInfo(
 			error: "Unsupported package manager",
 		});
 	}
-	return fetchFromRegistry(packageName, config);
+	return fetchFromRegistry(packageName, config, options);
 }
 
 export function getMultiplePackagesInfo(
 	packages: Array<{ name: string; manager: RegistryName }>,
 ): Promise<PackageVersionInfo[]> {
+	const batchOptions: FetchOptions = {
+		timeout: BATCH_TIMEOUT,
+		retry: RetryPresets.batch,
+	};
 	const promises = packages.map((pkg) =>
-		concurrencyLimit(() => getPackageInfo(pkg.name, pkg.manager)),
+		concurrencyLimit(() =>
+			getPackageInfo(pkg.name, pkg.manager, batchOptions),
+		),
 	);
 	return Promise.all(promises);
 }

@@ -87,4 +87,12 @@ export const RetryPresets = {
 		maxDelay: 10000,
 		shouldRetry: isRetryableError,
 	} as RetryOptions,
+	// Used by the batch analysis flow, where dozens of packages are checked
+	// per request — fewer attempts and shorter delays bound the worst case.
+	batch: {
+		maxAttempts: 2,
+		initialDelay: 300,
+		maxDelay: 1000,
+		shouldRetry: isRetryableError,
+	} as RetryOptions,
 };

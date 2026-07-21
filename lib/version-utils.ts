@@ -8,6 +8,13 @@ export function cleanVersion(version: string): string {
 		.trim();
 }
 
+// Plain semver.coerce() silently drops any prerelease tag (e.g. "1.0.0-beta"
+// coerces to "1.0.0"), which would hide a package pinned to a prerelease
+// version from ever showing as outdated once the stable release ships.
+function coerceVersion(version: string) {
+	return semver.coerce(version, { includePrerelease: true });
+}
+
 export function calculateVersionDiff(
 	current: string,
 	latest: string,
@@ -25,8 +32,8 @@ export function calculateVersionDiff(
 		)
 			return undefined;
 
-		const currentSemver = semver.coerce(cleanCurrent);
-		const latestSemver = semver.coerce(cleanLatest);
+		const currentSemver = coerceVersion(cleanCurrent);
+		const latestSemver = coerceVersion(cleanLatest);
 		if (!currentSemver || !latestSemver) return undefined;
 		if (semver.gte(currentSemver, latestSemver))
 			return {
@@ -66,6 +73,8 @@ export function calculateVersionDiff(
 	}
 }
 
+const RANGE_OPERATOR_PATTERN = /[\^~<>=]|\s/;
+
 export function compareVersions(
 	current: string,
 	latest: string,
@@ -80,9 +89,28 @@ export function compareVersions(
 		if (cleanCurrent === "any" || cleanCurrent === "*" || cleanCurrent === "x")
 			return PACKAGE_STATUS.UP_TO_DATE;
 		if (cleanCurrent === cleanLatest) return PACKAGE_STATUS.UP_TO_DATE;
-		const currentSemver = semver.coerce(cleanCurrent);
-		const latestSemver = semver.coerce(cleanLatest);
-		if (!currentSemver || !latestSemver) return PACKAGE_STATUS.ERROR;
+
+		const latestSemver = coerceVersion(cleanLatest);
+		if (!latestSemver) return PACKAGE_STATUS.ERROR;
+
+		// A range like "^5.0.0" is up to date whenever the latest release still
+		// satisfies it. Coercing both sides down to plain versions (below)
+		// would flag it as outdated as soon as latest moved past the range's
+		// floor, even though the range already allows that release.
+		const trimmedCurrent = current.trim();
+		if (RANGE_OPERATOR_PATTERN.test(trimmedCurrent)) {
+			const validRange = semver.validRange(trimmedCurrent);
+			if (validRange) {
+				return semver.satisfies(latestSemver, validRange, {
+					includePrerelease: true,
+				})
+					? PACKAGE_STATUS.UP_TO_DATE
+					: PACKAGE_STATUS.OUTDATED;
+			}
+		}
+
+		const currentSemver = coerceVersion(cleanCurrent);
+		if (!currentSemver) return PACKAGE_STATUS.ERROR;
 		if (semver.lt(currentSemver, latestSemver)) return PACKAGE_STATUS.OUTDATED;
 		return PACKAGE_STATUS.UP_TO_DATE;
 	} catch {

@@ -2,6 +2,20 @@ import * as yaml from "js-yaml";
 import type { DependencyParser, FileKind, ParsedDependencies } from "./types";
 
 class PackageJsonParser implements DependencyParser {
+	// Memoizes the last JSON.parse result so canParse+parse — always called
+	// back to back on the same content string in detectFileType — don't parse
+	// a payload up to 5MB twice.
+	private cachedContent?: string;
+	private cachedParsed?: unknown;
+
+	private parseJson(content: string): unknown {
+		if (this.cachedContent === content) return this.cachedParsed;
+		const parsed = JSON.parse(content);
+		this.cachedContent = content;
+		this.cachedParsed = parsed;
+		return parsed;
+	}
+
 	getFileType(): FileKind {
 		return "package.json";
 	}
@@ -12,13 +26,13 @@ class PackageJsonParser implements DependencyParser {
 	canParse(content: string, fileName?: string): boolean {
 		if (fileName?.toLowerCase().includes("package.json")) return true;
 		try {
-			const parsed = JSON.parse(content);
+			const parsed = this.parseJson(content);
+			if (typeof parsed !== "object" || parsed === null) return false;
 			return (
-				typeof parsed === "object" &&
-				("dependencies" in parsed ||
-					"devDependencies" in parsed ||
-					"peerDependencies" in parsed ||
-					("name" in parsed && "version" in parsed))
+				"dependencies" in parsed ||
+				"devDependencies" in parsed ||
+				"peerDependencies" in parsed ||
+				("name" in parsed && "version" in parsed)
 			);
 		} catch {
 			return false;
@@ -27,9 +41,17 @@ class PackageJsonParser implements DependencyParser {
 
 	parse(content: string): ParsedDependencies {
 		try {
-			const parsed = JSON.parse(content);
-			const dependencies = parsed.dependencies || {};
-			const devDependencies = parsed.devDependencies || {};
+			const parsed = this.parseJson(content) as Record<string, unknown>;
+			const dependencies =
+				(parsed.dependencies as Record<string, string>) || {};
+			// peerDependencies/optionalDependencies are folded into the
+			// devDependencies bucket so a manifest that only declares them
+			// (accepted by canParse above) doesn't silently yield zero packages.
+			const devDependencies = {
+				...((parsed.devDependencies as Record<string, string>) || {}),
+				...((parsed.peerDependencies as Record<string, string>) || {}),
+				...((parsed.optionalDependencies as Record<string, string>) || {}),
+			};
 			return {
 				kind: this.getFileType(),
 				dependencies,
@@ -137,9 +159,17 @@ class PubspecParser implements DependencyParser {
 				section as Record<string, unknown>,
 			)) {
 				if (name === "flutter" || name === "flutter_test") continue;
-				if (typeof value === "string") deps[name] = value;
-				else if (value === null || value === undefined) deps[name] = "any";
-				// skip git/path/sdk dependencies (objects)
+				if (typeof value === "string") {
+					deps[name] = value;
+				} else if (value === null || value === undefined) {
+					deps[name] = "any";
+				} else if (typeof value === "object" && "hosted" in value) {
+					// { hosted: ..., version: "^1.0.0" } — pinned to pub.dev (or a
+					// custom hosted registry) with an explicit version constraint.
+					const version = (value as Record<string, unknown>).version;
+					if (typeof version === "string") deps[name] = version;
+				}
+				// skip git/path/sdk dependencies without a hosted+version pair
 			}
 			return deps;
 		};
@@ -172,8 +202,16 @@ export function detectFileType(
 	}
 	const trimmed = content.trim();
 	if (trimmed.length === 0) throw new Error("File content is empty");
-	if (trimmed.startsWith("{"))
-		throw new Error("Invalid JSON format - file may be corrupted");
+	if (trimmed.startsWith("{")) {
+		try {
+			JSON.parse(trimmed);
+		} catch {
+			throw new Error("Invalid JSON format - file may be corrupted");
+		}
+		throw new Error(
+			"Valid JSON but it doesn't look like a package.json (no dependencies, devDependencies, peerDependencies, or name+version fields)",
+		);
+	}
 	if (/^[\w-]+(==|>=|<=|~=|!=|>|<)[\d.]+/.test(trimmed))
 		return new RequirementsParser().parse(content);
 	throw new Error(

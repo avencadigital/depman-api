@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { handle } from "hono/vercel";
+import packageJson from "@/package.json";
+import { CacheService } from "@/lib/cache-service";
 import {
 	ALLOWED_EXTENSIONS,
 	MAX_CONTENT_SIZE,
 	MAX_FILENAME_LENGTH,
 	MAX_PACKAGE_NAME_LENGTH,
+	MAX_PACKAGES_PER_ANALYSIS,
 	PACKAGE_NAME_PATTERNS,
 	REGISTRY_WEB_URLS,
 	VALID_REGISTRIES,
@@ -15,6 +18,7 @@ import {
 	getPackageInfo,
 } from "@/lib/package-services";
 import { detectFileType, getAllDependencies } from "@/lib/parsers";
+import { getClientKey, rateLimiter } from "@/lib/rate-limiter";
 import {
 	PACKAGE_STATUS,
 	type PackageInfo,
@@ -27,8 +31,28 @@ const app = new Hono().basePath("/api");
 // CORS middleware
 app.use("*", cors());
 
+// Rate limiting middleware (per client IP)
+app.use("*", async (c, next) => {
+	const key = getClientKey(c.req.raw.headers);
+	const { allowed, retryAfterSeconds } = rateLimiter.check(key);
+	if (!allowed) {
+		c.header("Retry-After", String(retryAfterSeconds));
+		return c.json({ error: "Too many requests, please try again later" }, 429);
+	}
+	return next();
+});
+
 // --- Health ---
-app.get("/health", (c) => c.json({ message: "Good!" }));
+const cache = CacheService.getInstance();
+app.get("/health", (c) =>
+	c.json({
+		message: "Good!",
+		status: "ok",
+		version: packageJson.version,
+		uptime: process.uptime(),
+		cache: cache.getStats(),
+	}),
+);
 
 // --- API Info (GET /api/analyze-packages) ---
 app.get("/analyze-packages", (c) => {
@@ -173,7 +197,24 @@ app.post("/analyze-packages", async (c) => {
 			});
 		}
 
-		const packagesToCheck = packageNames.map((name) => ({
+		if (packageNames.length > MAX_PACKAGES_PER_ANALYSIS) {
+			return c.json(
+				{
+					error: `Too many packages (max ${MAX_PACKAGES_PER_ANALYSIS} per analysis)`,
+					count: packageNames.length,
+				},
+				400,
+			);
+		}
+
+		const namePattern = PACKAGE_NAME_PATTERNS[packageData.packageManager];
+		const maxNameLength =
+			MAX_PACKAGE_NAME_LENGTH[packageData.packageManager];
+		const validNames = packageNames.filter(
+			(name) => name.length <= maxNameLength && namePattern.test(name),
+		);
+
+		const packagesToCheck = validNames.map((name) => ({
 			name,
 			manager: packageData.packageManager,
 		}));
@@ -184,7 +225,7 @@ app.post("/analyze-packages", async (c) => {
 			const info = infoByName.get(packageName) ?? {
 				name: packageName,
 				latestVersion: "unknown",
-				error: "No data returned",
+				error: "Invalid package name",
 			};
 			const currentVersion = allDependencies[packageName];
 			const metadata = buildPackageMetadata(info);
@@ -253,7 +294,9 @@ app.get("/package/:registry/:name", async (c) => {
 		);
 	}
 
-	const decodedName = decodeURIComponent(name);
+	// Hono already URL-decodes route params; decoding again here would corrupt
+	// names containing a literal encoded "%" (e.g. "%2540" -> "@").
+	const decodedName = name;
 	const maxNameLength = MAX_PACKAGE_NAME_LENGTH[packageManager];
 	if (!decodedName || decodedName.length > maxNameLength) {
 		return c.json({ error: "Invalid package name" }, 400);
@@ -281,6 +324,14 @@ app.get("/package/:registry/:name", async (c) => {
 			);
 		}
 
+		if (info.error) {
+			c.header("Cache-Control", "no-store");
+			return c.json(
+				{ error: info.error, name: decodedName, registry: packageManager },
+				502,
+			);
+		}
+
 		const response: Record<string, unknown> = {
 			name: decodedName,
 			registry: packageManager,
@@ -296,9 +347,7 @@ app.get("/package/:registry/:name", async (c) => {
 
 		if (currentVersion) {
 			response.currentVersion = currentVersion;
-			const status = info.error
-				? PACKAGE_STATUS.ERROR
-				: compareVersions(currentVersion, info.latestVersion);
+			const status = compareVersions(currentVersion, info.latestVersion);
 			response.status = status;
 			if (status === PACKAGE_STATUS.OUTDATED) {
 				const versionDiff = calculateVersionDiff(
@@ -309,12 +358,9 @@ app.get("/package/:registry/:name", async (c) => {
 			}
 		}
 
-		if (info.error) response.error = info.error;
-
-		const cacheMaxAge = info.error ? 60 : 300;
 		c.header(
 			"Cache-Control",
-			`public, s-maxage=${cacheMaxAge}, stale-while-revalidate=60`,
+			"public, s-maxage=300, stale-while-revalidate=60",
 		);
 		return c.json(response);
 	} catch (error) {
