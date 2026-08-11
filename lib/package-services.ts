@@ -7,8 +7,8 @@ import {
 	REGISTRY_API_URLS,
 } from "./constants";
 import {
-	RetryPresets,
 	type RetryOptions,
+	RetryPresets,
 	retryWithBackoff,
 } from "./retry-util";
 import type { PackageVersionInfo } from "./types";
@@ -295,9 +295,7 @@ export function getMultiplePackagesInfo(
 		retry: RetryPresets.batch,
 	};
 	const promises = packages.map((pkg) =>
-		concurrencyLimit(() =>
-			getPackageInfo(pkg.name, pkg.manager, batchOptions),
-		),
+		concurrencyLimit(() => getPackageInfo(pkg.name, pkg.manager, batchOptions)),
 	);
 	return Promise.all(promises);
 }

@@ -4,6 +4,8 @@ REST API for analyzing package dependencies and checking for outdated packages a
 
 Built with [Next.js 16](https://nextjs.org/) and [Hono](https://hono.dev/), deployed as serverless functions.
 
+Production API origin: [`https://api.depman.cloud`](https://api.depman.cloud). API routes use the `https://api.depman.cloud/api` base URL.
+
 ## Supported Ecosystems
 
 | Ecosystem | File | Registry |
@@ -104,7 +106,7 @@ pnpm install
 pnpm dev
 ```
 
-The API runs at `http://localhost:3000/api`.
+The local API runs at `http://localhost:3000/api`. In production, use `https://api.depman.cloud/api`.
 
 ## Project Structure
 

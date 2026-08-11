@@ -16,7 +16,7 @@ Análise profunda de `app/api/[...route]/route.ts` e `lib/*` (cache, retry, pars
 
 - [ ] **[depois] CORS sem restrição de origem** — `route.ts:28`. `cors()` aberto. Se a API é pública por design, documentar; senão `cors({ origin: ["https://depman.cloud", "https://www.depman.cloud"] })`. (Pendente da rodada anterior.)
 
-- [ ] **[depois] `typescript@6.0.3` vs. lição do deploy** — `package.json:28`. O deploy do app Next principal quebrou com TS > 5.x (check de dependências do Next no VPS/Nixpacks, commit `289cc9b`). Verificar se o build da depman-api no EasyPanel passa com TS 6; se o mesmo check do Next disparar, fixar em `~5.9`.
+- [x] **TypeScript 7 e Next.js 16.3** — migrado para `typescript@7.0.2`; removido o `baseUrl`, que deixou de ser suportado. `tsc --noEmit` e o build de produção do Next passam com Node.js 26.4.0.
 
 - [x] **`@types/js-yaml@4` com `js-yaml@5`** — Corrigido: removido `@types/js-yaml` do `package.json` (confirmado que `js-yaml@5.2.1` publica `types`/`exports` próprios no `dist/js-yaml.d.ts`, com um sistema de tags/schema diferente do que o `@types/js-yaml@4` descrevia). `pnpm install`, `tsc --noEmit` e `next build` seguem limpos.
 

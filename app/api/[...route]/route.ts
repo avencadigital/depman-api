@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { handle } from "hono/vercel";
-import packageJson from "@/package.json";
 import { CacheService } from "@/lib/cache-service";
 import {
 	ALLOWED_EXTENSIONS,
@@ -25,6 +24,7 @@ import {
 	type PackageMetadata,
 } from "@/lib/types";
 import { calculateVersionDiff, compareVersions } from "@/lib/version-utils";
+import packageJson from "@/package.json";
 
 const app = new Hono().basePath("/api");
 
@@ -90,6 +90,7 @@ app.get("/analyze-packages", (c) => {
 			},
 		},
 		links: {
+			api: "https://api.depman.cloud",
 			website: "https://depman.cloud",
 			github: "https://github.com/avencadigital/pack-man",
 		},
@@ -208,8 +209,7 @@ app.post("/analyze-packages", async (c) => {
 		}
 
 		const namePattern = PACKAGE_NAME_PATTERNS[packageData.packageManager];
-		const maxNameLength =
-			MAX_PACKAGE_NAME_LENGTH[packageData.packageManager];
+		const maxNameLength = MAX_PACKAGE_NAME_LENGTH[packageData.packageManager];
 		const validNames = packageNames.filter(
 			(name) => name.length <= maxNameLength && namePattern.test(name),
 		);
