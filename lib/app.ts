@@ -97,10 +97,12 @@ app.get("/analyze-packages", (c) => {
 // --- Errors ---
 
 // Unexpected errors (including a body that is not valid JSON) become a
-// generic 500; the message is only exposed in development.
+// generic 500; the message is only exposed in development. Server-side
+// failures are always logged so they show up in the container logs; a
+// malformed JSON body is the client's mistake and is not.
 app.onError((error, c) => {
 	if (error instanceof HTTPException) return error.getResponse();
-	if (process.env.NODE_ENV === "development")
+	if (!(error instanceof SyntaxError))
 		console.error(`Error in ${c.req.method} ${c.req.path}:`, error);
 	const message =
 		process.env.NODE_ENV === "development"
@@ -220,9 +222,10 @@ app.get("/package/:registry/:name", async (c) => {
 // room for the JSON-RPC envelope around a MAX_CONTENT_SIZE manifest.
 const mcpHandler = createMcpHandler(() => createDepmanMcpServer(), {
 	maxRequestBodySize: MAX_CONTENT_SIZE + 1024 * 1024,
+	// Also called for rejected client requests (bad protocol version,
+	// oversized body...), so log a one-line warning rather than a stack.
 	onerror: (error) => {
-		if (process.env.NODE_ENV === "development")
-			console.error("MCP error:", error);
+		console.warn(`MCP: ${error.message}`);
 	},
 });
 
