@@ -1,28 +1,14 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import {
+	analyzeManifest,
+	hasValidExtension,
+	lookupPackage,
+	sanitizeFileName,
+} from "@/lib/analysis-service";
 import { CacheService } from "@/lib/cache-service";
-import {
-	ALLOWED_EXTENSIONS,
-	MAX_CONTENT_SIZE,
-	MAX_FILENAME_LENGTH,
-	MAX_PACKAGE_NAME_LENGTH,
-	MAX_PACKAGES_PER_ANALYSIS,
-	PACKAGE_NAME_PATTERNS,
-	REGISTRY_WEB_URLS,
-	VALID_REGISTRIES,
-} from "@/lib/constants";
-import {
-	getMultiplePackagesInfo,
-	getPackageInfo,
-} from "@/lib/package-services";
-import { detectFileType, getAllDependencies } from "@/lib/parsers";
+import { MAX_CONTENT_SIZE, MAX_FILENAME_LENGTH } from "@/lib/constants";
 import { getClientKey, rateLimiter } from "@/lib/rate-limiter";
-import {
-	PACKAGE_STATUS,
-	type PackageInfo,
-	type PackageMetadata,
-} from "@/lib/types";
-import { calculateVersionDiff, compareVersions } from "@/lib/version-utils";
 import packageJson from "@/package.json";
 
 export const app = new Hono().basePath("/api");
@@ -98,36 +84,6 @@ app.get("/analyze-packages", (c) => {
 
 // --- Analyze Packages (POST) ---
 
-function sanitizeFileName(fileName: string): string {
-	return Array.from(fileName)
-		.filter((ch) => {
-			const code = ch.codePointAt(0) ?? 0;
-			if (code <= 0x1f || code === 0x7f) return false;
-			if (ch === "/" || ch === "\\") return false;
-			return true;
-		})
-		.join("")
-		.trim();
-}
-function buildPackageMetadata(info: {
-	license?: string;
-	repository?: string;
-	deprecated?: string | boolean;
-	lastPublished?: string;
-	keywords?: string[];
-}): PackageMetadata | undefined {
-	const metadata: PackageMetadata = {};
-	if (info.license) metadata.license = info.license;
-	if (info.repository) metadata.repository = info.repository;
-	if (info.deprecated) metadata.deprecated = info.deprecated;
-	if (info.lastPublished) metadata.lastPublished = info.lastPublished;
-	if (info.keywords?.length) metadata.keywords = info.keywords;
-	return Object.keys(metadata).length > 0 ? metadata : undefined;
-}
-
-function hasValidExtension(fileName: string): boolean {
-	return ALLOWED_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
-}
 function handleServerError(
 	c: { json: (data: unknown, status: number) => Response },
 	error: unknown,
@@ -149,6 +105,7 @@ app.post("/analyze-packages", async (c) => {
 			return c.json({ error: "Payload too large (max 5MB)" }, 413);
 		}
 
+		// Parsed regardless of Content-Type: production clients rely on it.
 		const body = await c.req.json();
 		const { content, fileName } = body;
 
@@ -176,100 +133,25 @@ app.post("/analyze-packages", async (c) => {
 			}
 		}
 
-		let packageData: ReturnType<typeof detectFileType>;
-		try {
-			packageData = detectFileType(content, sanitizedFileName);
-		} catch (error) {
-			const detail =
-				process.env.NODE_ENV === "development" && error instanceof Error
-					? `: ${error.message}`
-					: "";
-			return c.json({ error: `Failed to parse file content${detail}` }, 400);
-		}
+		const outcome = await analyzeManifest(content, sanitizedFileName);
 
-		const allDependencies = getAllDependencies(packageData);
-		const packageNames = Object.keys(allDependencies);
-
-		if (packageNames.length === 0) {
-			return c.json({
-				packages: [],
-				summary: { total: 0, upToDate: 0, outdated: 0, errors: 0 },
-			});
-		}
-
-		if (packageNames.length > MAX_PACKAGES_PER_ANALYSIS) {
-			return c.json(
-				{
-					error: `Too many packages (max ${MAX_PACKAGES_PER_ANALYSIS} per analysis)`,
-					count: packageNames.length,
-				},
-				400,
-			);
-		}
-
-		const namePattern = PACKAGE_NAME_PATTERNS[packageData.packageManager];
-		const maxNameLength = MAX_PACKAGE_NAME_LENGTH[packageData.packageManager];
-		const validNames = packageNames.filter(
-			(name) => name.length <= maxNameLength && namePattern.test(name),
-		);
-
-		const packagesToCheck = validNames.map((name) => ({
-			name,
-			manager: packageData.packageManager,
-		}));
-		const packageInfos = await getMultiplePackagesInfo(packagesToCheck);
-		const infoByName = new Map(packageInfos.map((info) => [info.name, info]));
-
-		const packages: PackageInfo[] = packageNames.map((packageName) => {
-			const info = infoByName.get(packageName) ?? {
-				name: packageName,
-				latestVersion: "unknown",
-				error: "Invalid package name",
-			};
-			const currentVersion = allDependencies[packageName];
-			const metadata = buildPackageMetadata(info);
-
-			if (info.error) {
-				return {
-					name: packageName,
-					currentVersion,
-					latestVersion: info.latestVersion,
-					status: PACKAGE_STATUS.ERROR,
-					packageManager: packageData.packageManager,
-					error: info.error,
-					metadata,
-				};
+		switch (outcome.kind) {
+			case "parse-error": {
+				const detail =
+					process.env.NODE_ENV === "development" ? `: ${outcome.message}` : "";
+				return c.json({ error: `Failed to parse file content${detail}` }, 400);
 			}
-
-			const status = compareVersions(currentVersion, info.latestVersion);
-			const versionDiff =
-				status === PACKAGE_STATUS.OUTDATED
-					? calculateVersionDiff(currentVersion, info.latestVersion)
-					: undefined;
-
-			return {
-				name: packageName,
-				currentVersion,
-				latestVersion: info.latestVersion,
-				status,
-				packageManager: packageData.packageManager,
-				description: info.description,
-				homepage: info.homepage,
-				versionDiff,
-				metadata,
-			};
-		});
-
-		const summary = {
-			total: packages.length,
-			upToDate: packages.filter((p) => p.status === PACKAGE_STATUS.UP_TO_DATE)
-				.length,
-			outdated: packages.filter((p) => p.status === PACKAGE_STATUS.OUTDATED)
-				.length,
-			errors: packages.filter((p) => p.status === PACKAGE_STATUS.ERROR).length,
-		};
-
-		return c.json({ packages, summary });
+			case "too-many-packages":
+				return c.json(
+					{
+						error: `Too many packages (max ${outcome.max} per analysis)`,
+						count: outcome.count,
+					},
+					400,
+				);
+			case "ok":
+				return c.json(outcome.result);
+		}
 	} catch (error) {
 		return handleServerError(c, error, "Error in analyze-packages API");
 	}
@@ -278,90 +160,52 @@ app.post("/analyze-packages", async (c) => {
 // --- Single Package Lookup ---
 
 app.get("/package/:registry/:name", async (c) => {
+	// Hono already URL-decodes route params; decoding again here would corrupt
+	// names containing a literal encoded "%" (e.g. "%2540" -> "@").
 	const registry = c.req.param("registry");
 	const name = c.req.param("name");
 	const currentVersion = c.req.query("current");
 
-	const packageManager = VALID_REGISTRIES[registry.toLowerCase()];
-	if (!packageManager) {
-		return c.json(
-			{
-				error: "Invalid registry",
-				validRegistries: Object.keys(VALID_REGISTRIES),
-			},
-			400,
-		);
-	}
-
-	// Hono already URL-decodes route params; decoding again here would corrupt
-	// names containing a literal encoded "%" (e.g. "%2540" -> "@").
-	const decodedName = name;
-	const maxNameLength = MAX_PACKAGE_NAME_LENGTH[packageManager];
-	if (!decodedName || decodedName.length > maxNameLength) {
-		return c.json({ error: "Invalid package name" }, 400);
-	}
-
-	const namePattern = PACKAGE_NAME_PATTERNS[packageManager];
-	if (!namePattern.test(decodedName)) {
-		return c.json(
-			{ error: `Invalid package name format for ${packageManager}` },
-			400,
-		);
-	}
-
 	try {
-		const info = await getPackageInfo(decodedName, packageManager);
+		const outcome = await lookupPackage(registry, name, currentVersion);
 
-		if (info.error === "Package not found") {
-			return c.json(
-				{
-					error: "Package not found",
-					name: decodedName,
-					registry: packageManager,
-				},
-				404,
-			);
-		}
-
-		if (info.error) {
-			c.header("Cache-Control", "no-store");
-			return c.json(
-				{ error: info.error, name: decodedName, registry: packageManager },
-				502,
-			);
-		}
-
-		const response: Record<string, unknown> = {
-			name: decodedName,
-			registry: packageManager,
-			latestVersion: info.latestVersion,
-			description: info.description,
-			homepage: info.homepage,
-			registryUrl: REGISTRY_WEB_URLS[packageManager](decodedName),
-			checkedAt: new Date().toISOString(),
-		};
-
-		const metadata = buildPackageMetadata(info);
-		if (metadata) response.metadata = metadata;
-
-		if (currentVersion) {
-			response.currentVersion = currentVersion;
-			const status = compareVersions(currentVersion, info.latestVersion);
-			response.status = status;
-			if (status === PACKAGE_STATUS.OUTDATED) {
-				const versionDiff = calculateVersionDiff(
-					currentVersion,
-					info.latestVersion,
+		switch (outcome.kind) {
+			case "invalid-registry":
+				return c.json(
+					{
+						error: "Invalid registry",
+						validRegistries: outcome.validRegistries,
+					},
+					400,
 				);
-				if (versionDiff) response.versionDiff = versionDiff;
-			}
+			case "invalid-name":
+				return c.json({ error: outcome.message }, 400);
+			case "not-found":
+				return c.json(
+					{
+						error: "Package not found",
+						name: outcome.name,
+						registry: outcome.registry,
+					},
+					404,
+				);
+			case "upstream-error":
+				c.header("Cache-Control", "no-store");
+				return c.json(
+					{
+						error: outcome.error,
+						name: outcome.name,
+						registry: outcome.registry,
+					},
+					502,
+				);
+			case "ok":
+				c.header(
+					"Cache-Control",
+					"public, s-maxage=300, stale-while-revalidate=60",
+				);
+				return c.json(outcome.result);
 		}
-
-		c.header(
-			"Cache-Control",
-			"public, s-maxage=300, stale-while-revalidate=60",
-		);
-		return c.json(response);
 	} catch (error) {
 		return handleServerError(c, error, "Error fetching package info");
 	}
