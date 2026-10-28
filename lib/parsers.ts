@@ -1,6 +1,33 @@
 import * as yaml from "js-yaml";
 import type { DependencyParser, FileKind, ParsedDependencies } from "./types";
 
+// Keeps only `name: "version"` pairs from a dependency section. npm only
+// allows string specifiers; anything else (a string or array section, object
+// or numeric versions) would otherwise leak into the response as bogus
+// packages or non-string versions.
+function stringEntries(section: unknown): Record<string, string> {
+	if (typeof section !== "object" || section === null || Array.isArray(section))
+		return {};
+	return Object.fromEntries(
+		Object.entries(section).filter(
+			([, version]) => typeof version === "string",
+		),
+	);
+}
+
+// Reduces a requirements.txt line to its "name<specifier>" part: drops inline
+// comments (" # ..."), environment markers ("; python_version ..."), per-line
+// options such as --hash, and a trailing line-continuation backslash.
+function stripRequirementNoise(line: string): string {
+	return line
+		.trim()
+		.replace(/\s+#.*$/, "")
+		.split(";")[0]
+		.replace(/\s+--\S.*$/, "")
+		.replace(/\\$/, "")
+		.trim();
+}
+
 class PackageJsonParser implements DependencyParser {
 	// Memoizes the last JSON.parse result so canParse+parse — always called
 	// back to back on the same content string in detectFileType — don't parse
@@ -42,15 +69,14 @@ class PackageJsonParser implements DependencyParser {
 	parse(content: string): ParsedDependencies {
 		try {
 			const parsed = this.parseJson(content) as Record<string, unknown>;
-			const dependencies =
-				(parsed.dependencies as Record<string, string>) || {};
+			const dependencies = stringEntries(parsed.dependencies);
 			// peerDependencies/optionalDependencies are folded into the
 			// devDependencies bucket so a manifest that only declares them
 			// (accepted by canParse above) doesn't silently yield zero packages.
 			const devDependencies = {
-				...((parsed.devDependencies as Record<string, string>) || {}),
-				...((parsed.peerDependencies as Record<string, string>) || {}),
-				...((parsed.optionalDependencies as Record<string, string>) || {}),
+				...stringEntries(parsed.devDependencies),
+				...stringEntries(parsed.peerDependencies),
+				...stringEntries(parsed.optionalDependencies),
 			};
 			return {
 				kind: this.getFileType(),
@@ -89,9 +115,11 @@ class RequirementsParser implements DependencyParser {
 	parse(content: string): ParsedDependencies {
 		const dependencies: Record<string, string> = {};
 		for (const line of content.split("\n")) {
-			const trimmed = line.trim();
+			const trimmed = stripRequirementNoise(line);
 			if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("-"))
 				continue;
+			// Direct references ("name @ https://...") have no registry version.
+			if (trimmed.includes(" @ ")) continue;
 			let name = trimmed,
 				version = "latest";
 			const specifiers = ["==", ">=", "<=", "~=", "!=", ">", "<"];

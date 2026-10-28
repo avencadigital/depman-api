@@ -31,7 +31,15 @@ export class CacheService {
 	}
 
 	private generateKey(packageName: string, packageManager: string): string {
-		return `${packageManager}:${packageName.toLowerCase()}`;
+		// PyPI names are case-insensitive and treat runs of "-", "_" and "."
+		// as equal (PEP 503). npm names are case-sensitive (legacy packages
+		// like "JSONStream" and "jsonstream" are distinct) and pub names are
+		// lowercase only, so those are keyed as-is.
+		const normalized =
+			packageManager === "pip"
+				? packageName.toLowerCase().replace(/[-_.]+/g, "-")
+				: packageName;
+		return `${packageManager}:${normalized}`;
 	}
 
 	get(packageName: string, packageManager: string): PackageVersionInfo | null {

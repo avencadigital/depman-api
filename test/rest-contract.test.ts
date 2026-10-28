@@ -414,3 +414,31 @@ describe("cross-cutting behavior", () => {
 		expect(res.status).toBe(404);
 	});
 });
+
+describe("cache", () => {
+	// Regression: a cached PyPI entry stored under another spelling of the
+	// name made the analysis report "Invalid package name".
+	it("matches PyPI names case-insensitively without breaking the analysis", async () => {
+		await request("/api/package/pip/requests");
+		const res = await postAnalyze(
+			JSON.stringify({
+				content: "Requests==2.28.0\n",
+				fileName: "requirements.txt",
+			}),
+		);
+		const body = await res.json();
+		expect(body.packages[0]).toMatchObject({
+			name: "Requests",
+			status: "outdated",
+			latestVersion: "2.33.0",
+		});
+		expect(registryFetch).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps npm names case-sensitive", async () => {
+		await request("/api/package/npm/hono");
+		const res = await request("/api/package/npm/Hono");
+		expect(res.status).toBe(404);
+		expect(registryFetch).toHaveBeenCalledTimes(2);
+	});
+});

@@ -94,8 +94,11 @@ async function fetchFromRegistry(
 	config: RegistryConfig,
 	options: FetchOptions = {},
 ): Promise<PackageVersionInfo> {
+	// Cache keys may be normalized (PyPI names are case-insensitive), so a hit
+	// can carry another spelling of the name: callers match results by the
+	// exact name they asked for.
 	const cached = cache.get(packageName, config.cacheKey);
-	if (cached) return cached;
+	if (cached) return { ...cached, name: packageName };
 
 	try {
 		const response = await retryWithBackoff(
