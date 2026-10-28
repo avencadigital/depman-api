@@ -65,7 +65,7 @@ describe("GET /api/health", () => {
 		expect(body).toEqual({
 			message: "Good!",
 			status: "ok",
-			version: "0.2.0",
+			version: "0.3.0",
 			uptime: expect.any(Number),
 			cache: {
 				totalEntries: expect.any(Number),

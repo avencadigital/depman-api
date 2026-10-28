@@ -44,7 +44,7 @@ exports[`GET /api/analyze-packages > returns the API description document 1`] = 
     },
     "name": "Dep-Man — Dependency Manager API",
     "status": "operational",
-    "version": "0.2.0",
+    "version": "0.3.0",
   },
   "cacheControl": null,
   "contentType": "application/json",
