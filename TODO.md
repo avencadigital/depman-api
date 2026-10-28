@@ -17,8 +17,16 @@ Pendências abertas (revisado em 2026-10-28). Itens concluídos ficam no histór
 
 ## Melhorias
 
-- [ ] **Abandonar o wrapper Next.js** — a API só usa o catch-all `app/api/[...route]/route.ts`, que agora apenas delega para `lib/app.ts`. Rodar o Hono direto com `@hono/node-server` remove o build do Next, os riscos recorrentes de deploy (Next × TypeScript, Nixpacks/corepack), centenas de MB de `node_modules` e a superfície de vulnerabilidades do Next (a atualização 16.3 → 16.4 corrigiu RCEs críticas). Os testes de contrato cobrem a migração.
-- [ ] **Filtro no MCP** — parâmetro opcional `onlyOutdated` em `analyze_dependencies` para reduzir respostas grandes (até 500 pacotes com metadados) enviadas aos agentes.
+- [ ] **Abandonar o wrapper Next.js (migrar para Hono puro)** — a API só usa o catch-all `app/api/[...route]/route.ts`, que apenas delega para `lib/app.ts`. O Hono roda direto no Node com o adaptador oficial `@hono/node-server`.
+  - **Por quê:** a maior parte das vulnerabilidades encontradas era do Next (a atualização 16.3 → 16.4 corrigiu RCEs críticas); sem ele somem essa superfície, os conflitos recorrentes de deploy (Next × TypeScript, Nixpacks/corepack), centenas de MB de `node_modules` e o build lento.
+  - **Passos:**
+    1. Criar `server.ts` com `serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3000) })` (`@hono/node-server`).
+    2. Mover os headers de segurança do `next.config.ts` (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Strict-Transport-Security`) para o middleware `hono/secure-headers` (o `X-Powered-By` deixa de existir: o Hono não envia esse header).
+    3. Substituir `app/page.tsx` por uma rota `GET /` no Hono (texto simples) e decidir o que fazer com `/_next/*` (passa a ser 404).
+    4. O app usa `basePath("/api")`: criar um app raiz que monte `/` e o app da API, ou remover o `basePath` e montar com `app.route("/api", api)`.
+    5. Build com `tsc` (ou `esbuild`/`tsup`) para `dist/`; scripts `build` e `start` (`node dist/server.js`). Atenção ao alias `@/` (usado nos imports) e ao `import packageJson from "@/package.json"`: trocar por caminhos relativos ou resolver no bundler.
+    6. Remover `next`, `react`, `react-dom`, `@types/react*`, a pasta `app/`, `next.config.ts`, `next-env.d.ts` e o plugin `next` do `tsconfig.json`.
+    7. Ajustar o deploy na EasyPanel (comandos de build/start e porta) e validar com `pnpm test` (os testes chamam o app Hono direto, então cobrem a migração) e um smoke test com `curl` (health, analyze, package, mcp e headers de segurança).
 - [ ] **Próximas fases do MCP** — tools `search`/`fetch` para o ChatGPT, autenticação (API key, depois OAuth) e empacotamento como plugin. Ver `docs/MCP_PLAN.md`, seção 8.
 
 ## Limitações conhecidas

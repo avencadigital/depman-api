@@ -103,7 +103,7 @@ The same analysis is available to AI agents as an [MCP](https://modelcontextprot
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `analyze_dependencies` | `content`, `fileName?` | Same result as `POST /api/analyze-packages` |
+| `analyze_dependencies` | `content`, `fileName?`, `onlyOutdated?` | Same result as `POST /api/analyze-packages`; `onlyOutdated: true` drops up-to-date packages (the summary still counts all) |
 | `get_package_info` | `registry`, `name`, `currentVersion?` | Same result as `GET /api/package/:registry/:name` |
 
 Both tools are read-only and return `structuredContent` with a declared output schema. The endpoint has its own rate limit (120 requests/min per IP).

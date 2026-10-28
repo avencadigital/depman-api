@@ -132,7 +132,9 @@ export function createDepmanMcpServer(): McpServer {
 				"or pubspec.yaml (Dart/Flutter) against its registry. Returns, per package, the " +
 				"latest version, whether it is up to date or outdated, how far behind it is " +
 				"(majors/minors/patches, breaking changes, urgency) and metadata such as " +
-				"license and deprecation, plus a summary.",
+				"license and deprecation, plus a summary. Set onlyOutdated to true to receive " +
+				"only packages that need attention (outdated or failed lookups), which keeps " +
+				"the response small for large projects; the summary still counts every package.",
 			inputSchema: z.object({
 				content: z
 					.string()
@@ -146,11 +148,18 @@ export function createDepmanMcpServer(): McpServer {
 					.describe(
 						"Original file name (e.g. package.json). Optional; helps detect the format.",
 					),
+				onlyOutdated: z
+					.boolean()
+					.optional()
+					.describe(
+						"When true, packages that are up to date are omitted from `packages` " +
+							"(outdated and error entries are kept). Defaults to false.",
+					),
 			}),
 			outputSchema: analysisOutputSchema,
 			annotations: READ_ONLY_REGISTRY_TOOL,
 		},
-		async ({ content, fileName }) => {
+		async ({ content, fileName, onlyOutdated }) => {
 			let sanitizedFileName: string | undefined;
 			if (fileName) {
 				sanitizedFileName = sanitizeFileName(fileName);
@@ -169,8 +178,15 @@ export function createDepmanMcpServer(): McpServer {
 					return toolError(
 						`Too many packages: ${outcome.count} (max ${outcome.max} per analysis)`,
 					);
-				case "ok":
-					return toolResult({ ...outcome.result });
+				case "ok": {
+					const { packages, summary } = outcome.result;
+					return toolResult({
+						packages: onlyOutdated
+							? packages.filter((pkg) => pkg.status !== "up-to-date")
+							: packages,
+						summary,
+					});
+				}
 			}
 		},
 	);

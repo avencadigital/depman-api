@@ -104,6 +104,11 @@ describe.each(clientFactories)("MCP over %s", (_label, connect) => {
 			"analyze_dependencies",
 			"get_package_info",
 		]);
+		const analyze = tools.find((t) => t.name === "analyze_dependencies");
+		expect(analyze?.inputSchema).toMatchObject({
+			properties: { onlyOutdated: { type: "boolean" } },
+			required: ["content"],
+		});
 		for (const tool of tools) {
 			expect(tool.inputSchema).toMatchObject({ type: "object" });
 			expect(tool.outputSchema).toMatchObject({ type: "object" });
@@ -142,6 +147,50 @@ describe.each(clientFactories)("MCP over %s", (_label, connect) => {
 			outdated: 2,
 			errors: 0,
 		});
+	});
+
+	it("analyze_dependencies with onlyOutdated keeps only packages needing attention", async () => {
+		const content = JSON.stringify({
+			dependencies: {
+				hono: "^4.0.0", // up to date
+				react: "~18.2.0", // outdated
+				"does-not-exist": "1.0.0", // error
+			},
+		});
+		const result = await client.callTool({
+			name: "analyze_dependencies",
+			arguments: { content, fileName: "package.json", onlyOutdated: true },
+		});
+		expect(result.isError).toBeFalsy();
+		const output = result.structuredContent as {
+			packages: Array<{ name: string; status: string }>;
+			summary: Record<string, number>;
+		};
+		expect(output.packages.map((p) => [p.name, p.status])).toEqual([
+			["react", "outdated"],
+			["does-not-exist", "error"],
+		]);
+		// The summary still describes the whole manifest.
+		expect(output.summary).toEqual({
+			total: 3,
+			upToDate: 1,
+			outdated: 1,
+			errors: 1,
+		});
+		const [text] = result.content as Array<{ text: string }>;
+		expect(JSON.parse(text.text)).toEqual(output);
+	});
+
+	it("analyze_dependencies returns every package when onlyOutdated is false", async () => {
+		const result = await client.callTool({
+			name: "analyze_dependencies",
+			arguments: {
+				content: JSON.stringify({ dependencies: { hono: "^4.0.0" } }),
+				onlyOutdated: false,
+			},
+		});
+		const output = result.structuredContent as { packages: unknown[] };
+		expect(output.packages).toHaveLength(1);
 	});
 
 	it("analyze_dependencies reports parse errors as tool errors", async () => {

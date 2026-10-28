@@ -40,9 +40,11 @@ Endpoint: `https://api.depman.cloud/api/mcp` (same Hono app, `app.all("/mcp", â€
 
 | Tool | Input | Annotations |
 |---|---|---|
-| `analyze_dependencies` | `content`, `fileName?` | `readOnlyHint: true`, `openWorldHint: true` |
+| `analyze_dependencies` | `content`, `fileName?`, `onlyOutdated?` | `readOnlyHint: true`, `openWorldHint: true` |
 | `get_package_info` | `registry` (`npm` \| `pip` \| `pub`), `name`, `currentVersion?` | same |
 | `check_packages` (optional) | list of `{ registry, name, version }` | same |
+
+`onlyOutdated` (added 2026-10-28) keeps only outdated and error entries in `packages`, while `summary` still counts every package. Measured on this repo's `package.json` (18 packages, 1 outdated): 7,618 â†’ 576 bytes. MCP sends the payload twice (`structuredContent` + JSON text), so on large manifests it avoids tens of thousands of tokens.
 
 Each tool declares an `outputSchema` and returns `structuredContent` plus the same JSON as text in `content`.
 
