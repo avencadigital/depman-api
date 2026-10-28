@@ -97,6 +97,31 @@ GET /api/package/pip/requests?current=2.28.0
 GET /api/package/pub/provider?current=6.0.0
 ```
 
+## MCP Server
+
+The same analysis is available to AI agents as an [MCP](https://modelcontextprotocol.io) server at `https://api.depman.cloud/api/mcp` (Streamable HTTP, stateless, no authentication). It serves both the 2026-07-28 protocol and 2025-era clients.
+
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `analyze_dependencies` | `content`, `fileName?` | Same result as `POST /api/analyze-packages` |
+| `get_package_info` | `registry`, `name`, `currentVersion?` | Same result as `GET /api/package/:registry/:name` |
+
+Both tools are read-only and return `structuredContent` with a declared output schema. The endpoint has its own rate limit (120 requests/min per IP).
+
+**Codex:**
+
+```bash
+codex mcp add depman --url https://api.depman.cloud/api/mcp
+```
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http depman https://api.depman.cloud/api/mcp
+```
+
+See [`docs/MCP_PLAN.md`](docs/MCP_PLAN.md) for the design and roadmap (ChatGPT, plugins, auth).
+
 ## Getting Started
 
 **Prerequisites:** Node.js 24+, pnpm
@@ -108,13 +133,24 @@ pnpm dev
 
 The local API runs at `http://localhost:3000/api`. In production, use `https://api.depman.cloud/api`.
 
+```bash
+pnpm test        # Vitest: REST contract snapshots + MCP end-to-end tests (offline)
+pnpm typecheck   # Type-check app and tests
+pnpm lint
+```
+
+`test/rest-contract.test.ts` pins the REST behavior the Chrome and VS Code extensions rely on. A failing snapshot there means a client-visible change.
+
 ## Project Structure
 
 ```
 app/
-  api/[...route]/route.ts   # Hono router (all API endpoints)
+  api/[...route]/route.ts   # Next.js entry point, delegates to lib/app.ts
   page.tsx                   # Minimal landing page
 lib/
+  app.ts                     # Hono app: REST routes, MCP endpoint, middleware
+  analysis-service.ts        # Analysis/lookup logic shared by REST and MCP
+  mcp/server.ts              # MCP server and tool definitions
   cache-service.ts           # In-memory cache with TTL and size limits
   constants.ts               # Registry URLs, validation rules, limits
   package-services.ts        # Registry fetchers (npm, PyPI, pub.dev)
@@ -122,6 +158,7 @@ lib/
   retry-util.ts              # Retry with exponential backoff and jitter
   types.ts                   # Shared TypeScript interfaces
   version-utils.ts           # Semver comparison and diff calculation
+test/                        # Vitest tests, registry fixtures, snapshots
 ```
 
 ## Key Details
@@ -137,9 +174,11 @@ lib/
 
 - **Runtime:** Next.js 16 (App Router)
 - **Routing:** Hono
-- **Language:** TypeScript 5.9
+- **Language:** TypeScript 7
 - **Package Manager:** pnpm
 - **Parsing:** semver, js-yaml
+- **MCP:** `@modelcontextprotocol/server` (SDK v2), Zod
+- **Tests:** Vitest
 
 ## Contributing
 

@@ -1,3 +1,4 @@
+import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
@@ -8,18 +9,22 @@ import {
 } from "@/lib/analysis-service";
 import { CacheService } from "@/lib/cache-service";
 import { MAX_CONTENT_SIZE, MAX_FILENAME_LENGTH } from "@/lib/constants";
-import { getClientKey, rateLimiter } from "@/lib/rate-limiter";
+import { createDepmanMcpServer } from "@/lib/mcp/server";
+import { getClientKey, mcpRateLimiter, rateLimiter } from "@/lib/rate-limiter";
 import packageJson from "@/package.json";
 
 export const app = new Hono().basePath("/api");
 
+const MCP_PATH = "/api/mcp";
+
 // CORS middleware
 app.use("*", cors());
 
-// Rate limiting middleware (per client IP)
+// Rate limiting middleware (per client IP; /mcp has its own budget)
 app.use("*", async (c, next) => {
 	const key = getClientKey(c.req.raw.headers);
-	const { allowed, retryAfterSeconds } = rateLimiter.check(key);
+	const limiter = c.req.path === MCP_PATH ? mcpRateLimiter : rateLimiter;
+	const { allowed, retryAfterSeconds } = limiter.check(key);
 	if (!allowed) {
 		c.header("Retry-After", String(retryAfterSeconds));
 		return c.json({ error: "Too many requests, please try again later" }, 429);
@@ -210,3 +215,19 @@ app.get("/package/:registry/:name", async (c) => {
 		return handleServerError(c, error, "Error fetching package info");
 	}
 });
+
+// --- MCP (Streamable HTTP, stateless) ---
+
+// One McpServer per request, no sessions: works across restarts and
+// multiple instances. Serves both the 2026-07-28 protocol and 2025-era
+// clients (stateless fallback; GET/DELETE answer 405). The body limit leaves
+// room for the JSON-RPC envelope around a MAX_CONTENT_SIZE manifest.
+const mcpHandler = createMcpHandler(() => createDepmanMcpServer(), {
+	maxRequestBodySize: MAX_CONTENT_SIZE + 1024 * 1024,
+	onerror: (error) => {
+		if (process.env.NODE_ENV === "development")
+			console.error("MCP error:", error);
+	},
+});
+
+app.all("/mcp", (c) => mcpHandler.fetch(c.req.raw));

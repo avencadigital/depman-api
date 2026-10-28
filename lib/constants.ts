@@ -27,6 +27,7 @@ export const MAX_PACKAGES_PER_ANALYSIS = 500;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 export const RATE_LIMIT_MAX_REQUESTS = 30;
 export const RATE_LIMIT_MAX_TRACKED_KEYS = 5000;
+export const MCP_RATE_LIMIT_MAX_REQUESTS = 120;
 
 // ---------------------------------------------------------------------------
 // Registry mappings
