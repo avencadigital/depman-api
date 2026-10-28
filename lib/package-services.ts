@@ -14,6 +14,10 @@ import {
 import type { PackageVersionInfo } from "./types";
 
 const cache = CacheService.getInstance();
+// Intentionally process-wide, not per request: it caps the total number of
+// in-flight registry calls across all concurrent analyses, protecting the
+// upstream registries (and our IP's standing with them) from bursts. The
+// trade-off is that a large analysis can delay a small one queued behind it.
 const concurrencyLimit = pLimit(MAX_CONCURRENT_REQUESTS);
 
 function extractRepoUrl(repo: unknown): string | undefined {

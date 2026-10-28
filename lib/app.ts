@@ -2,6 +2,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
 import {
 	analyzeManifest,
 	hasValidExtension,
@@ -93,21 +94,22 @@ app.get("/analyze-packages", (c) => {
 	});
 });
 
-// --- Analyze Packages (POST) ---
+// --- Errors ---
 
-function handleServerError(
-	c: { json: (data: unknown, status: number) => Response },
-	error: unknown,
-	context: string,
-) {
+// Unexpected errors (including a body that is not valid JSON) become a
+// generic 500; the message is only exposed in development.
+app.onError((error, c) => {
+	if (error instanceof HTTPException) return error.getResponse();
 	if (process.env.NODE_ENV === "development")
-		console.error(`${context}:`, error);
+		console.error(`Error in ${c.req.method} ${c.req.path}:`, error);
 	const message =
-		process.env.NODE_ENV === "development" && error instanceof Error
+		process.env.NODE_ENV === "development"
 			? error.message
 			: "Internal server error";
 	return c.json({ error: message }, 500);
-}
+});
+
+// --- Analyze Packages (POST) ---
 
 // Enforces the size limit while streaming, so a chunked body without a
 // Content-Length header can't make the server buffer an unbounded payload.
@@ -117,56 +119,49 @@ const analyzeBodyLimit = bodyLimit({
 });
 
 app.post("/analyze-packages", analyzeBodyLimit, async (c) => {
-	try {
-		// Parsed regardless of Content-Type: production clients rely on it.
-		const body = await c.req.json();
-		const { content, fileName } = body;
+	// Parsed regardless of Content-Type: production clients rely on it.
+	const body = await c.req.json();
+	const { content, fileName } = body;
 
-		if (!content || typeof content !== "string") {
-			return c.json({ error: "Valid content is required" }, 400);
-		}
-		if (content.length > MAX_CONTENT_SIZE) {
-			return c.json({ error: "Content too large (max 5MB)" }, 413);
-		}
+	if (!content || typeof content !== "string") {
+		return c.json({ error: "Valid content is required" }, 400);
+	}
+	if (content.length > MAX_CONTENT_SIZE) {
+		return c.json({ error: "Content too large (max 5MB)" }, 413);
+	}
 
-		let sanitizedFileName: string | undefined;
-		if (fileName) {
-			if (
-				typeof fileName !== "string" ||
-				fileName.length > MAX_FILENAME_LENGTH
-			) {
-				return c.json({ error: "Invalid filename" }, 400);
-			}
-			sanitizedFileName = sanitizeFileName(fileName);
-			if (sanitizedFileName && !hasValidExtension(sanitizedFileName)) {
-				return c.json(
-					{ error: "Invalid file type. Allowed: .json, .txt, .yaml, .yml" },
-					400,
-				);
-			}
+	let sanitizedFileName: string | undefined;
+	if (fileName) {
+		if (typeof fileName !== "string" || fileName.length > MAX_FILENAME_LENGTH) {
+			return c.json({ error: "Invalid filename" }, 400);
 		}
-
-		const outcome = await analyzeManifest(content, sanitizedFileName);
-
-		switch (outcome.kind) {
-			case "parse-error": {
-				const detail =
-					process.env.NODE_ENV === "development" ? `: ${outcome.message}` : "";
-				return c.json({ error: `Failed to parse file content${detail}` }, 400);
-			}
-			case "too-many-packages":
-				return c.json(
-					{
-						error: `Too many packages (max ${outcome.max} per analysis)`,
-						count: outcome.count,
-					},
-					400,
-				);
-			case "ok":
-				return c.json(outcome.result);
+		sanitizedFileName = sanitizeFileName(fileName);
+		if (sanitizedFileName && !hasValidExtension(sanitizedFileName)) {
+			return c.json(
+				{ error: "Invalid file type. Allowed: .json, .txt, .yaml, .yml" },
+				400,
+			);
 		}
-	} catch (error) {
-		return handleServerError(c, error, "Error in analyze-packages API");
+	}
+
+	const outcome = await analyzeManifest(content, sanitizedFileName);
+
+	switch (outcome.kind) {
+		case "parse-error": {
+			const detail =
+				process.env.NODE_ENV === "development" ? `: ${outcome.message}` : "";
+			return c.json({ error: `Failed to parse file content${detail}` }, 400);
+		}
+		case "too-many-packages":
+			return c.json(
+				{
+					error: `Too many packages (max ${outcome.max} per analysis)`,
+					count: outcome.count,
+				},
+				400,
+			);
+		case "ok":
+			return c.json(outcome.result);
 	}
 });
 
@@ -179,48 +174,41 @@ app.get("/package/:registry/:name", async (c) => {
 	const name = c.req.param("name");
 	const currentVersion = c.req.query("current");
 
-	try {
-		const outcome = await lookupPackage(registry, name, currentVersion);
+	const outcome = await lookupPackage(registry, name, currentVersion);
 
-		switch (outcome.kind) {
-			case "invalid-registry":
-				return c.json(
-					{
-						error: "Invalid registry",
-						validRegistries: outcome.validRegistries,
-					},
-					400,
-				);
-			case "invalid-name":
-				return c.json({ error: outcome.message }, 400);
-			case "not-found":
-				return c.json(
-					{
-						error: "Package not found",
-						name: outcome.name,
-						registry: outcome.registry,
-					},
-					404,
-				);
-			case "upstream-error":
-				c.header("Cache-Control", "no-store");
-				return c.json(
-					{
-						error: outcome.error,
-						name: outcome.name,
-						registry: outcome.registry,
-					},
-					502,
-				);
-			case "ok":
-				c.header(
-					"Cache-Control",
-					"public, s-maxage=300, stale-while-revalidate=60",
-				);
-				return c.json(outcome.result);
-		}
-	} catch (error) {
-		return handleServerError(c, error, "Error fetching package info");
+	switch (outcome.kind) {
+		case "invalid-registry":
+			return c.json(
+				{ error: "Invalid registry", validRegistries: outcome.validRegistries },
+				400,
+			);
+		case "invalid-name":
+			return c.json({ error: outcome.message }, 400);
+		case "not-found":
+			return c.json(
+				{
+					error: "Package not found",
+					name: outcome.name,
+					registry: outcome.registry,
+				},
+				404,
+			);
+		case "upstream-error":
+			c.header("Cache-Control", "no-store");
+			return c.json(
+				{
+					error: outcome.error,
+					name: outcome.name,
+					registry: outcome.registry,
+				},
+				502,
+			);
+		case "ok":
+			c.header(
+				"Cache-Control",
+				"public, s-maxage=300, stale-while-revalidate=60",
+			);
+			return c.json(outcome.result);
 	}
 });
 
