@@ -133,6 +133,12 @@ pnpm dev
 
 The local API runs at `http://localhost:3000/api`. In production, use `https://api.depman.cloud/api`.
 
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLIENT_IP_HEADER` | _(unset)_ | Header with the real client IP, used for rate limiting. Set to `cf-connecting-ip` behind Cloudflare, and only when the origin is reachable exclusively through Cloudflare. Unset, the first `X-Forwarded-For` entry is used. |
+
 ```bash
 pnpm test        # Vitest: REST contract snapshots + MCP end-to-end tests (offline)
 pnpm typecheck   # Type-check app and tests
@@ -166,7 +172,9 @@ test/                        # Vitest tests, registry fixtures, snapshots
 - Auto-detects file format from content when `fileName` is not provided.
 - Concurrent registry lookups with configurable concurrency limit (default: 10).
 - Retry with exponential backoff for transient failures (timeouts, 429s, 5xx).
-- In-memory cache: 5 min TTL for successful lookups, 30s for errors, max 500 entries.
+- In-memory cache: 5 min TTL for successful lookups, 2 min for errors, max 500 entries.
+- Rate limiting: 30 requests/min per client IP for the REST API, 120/min for `/api/mcp`.
+- Request bodies above 5 MB are rejected while streaming (HTTP 413).
 - Version diff includes urgency classification: `none`, `low`, `medium`, `high`, `critical`.
 - Input validation: file size (5 MB), filename sanitization, per-registry name patterns and length limits.
 

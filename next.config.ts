@@ -4,6 +4,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
 	poweredByHeader: false,
 	output: "standalone",
+	// The API serves no images: disabling the optimizer removes the
+	// /_next/image endpoint, a recurring source of Next.js advisories.
+	images: { unoptimized: true },
 	turbopack: {
 		root: path.resolve(__dirname),
 	},

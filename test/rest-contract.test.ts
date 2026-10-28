@@ -294,6 +294,25 @@ describe("POST /api/analyze-packages", () => {
 		});
 	});
 
+	it("stops reading a chunked body without Content-Length past the size limit", async () => {
+		const chunk = new TextEncoder().encode("a".repeat(1024 * 1024));
+		let chunksRead = 0;
+		const body = new ReadableStream({
+			pull(controller) {
+				if (chunksRead++ < 50) controller.enqueue(chunk);
+				else controller.close();
+			},
+		});
+		const res = await request("/api/analyze-packages", {
+			method: "POST",
+			body,
+			duplex: "half",
+		} as RequestInit);
+		expect(res.status).toBe(413);
+		expect(await res.json()).toEqual({ error: "Payload too large (max 5MB)" });
+		expect(chunksRead).toBeLessThan(10);
+	});
+
 	// Current behavior: a body that is not JSON surfaces as a generic 500.
 	it("answers malformed JSON with a generic 500", async () => {
 		const res = await postAnalyze("{not json");

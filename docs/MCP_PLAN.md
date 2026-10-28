@@ -110,7 +110,7 @@ Decision: keep the VPS (no per-request subrequest or CPU limits, in-memory cache
 - Free alternatives were rejected: Cloudflare Workers Free caps subrequests at 50 per request (an analysis can make up to 500 registry calls); Vercel Hobby is reported as non-commercial only; free tiers that sleep add cold starts.
 - Cloudflare benefits: hides the VPS IP, always-on DDoS protection, edge caching for `GET /api/package/*` (already sends `s-maxage=300`; needs a Cache Rule for JSON), one free edge rate-limiting rule, managed TLS.
 - Required when enabling the proxy:
-  1. `getClientKey` (`lib/rate-limiter.ts`) must use `CF-Connecting-IP`. Today the first `X-Forwarded-For` entry is trusted, which a client may spoof depending on the reverse proxy.
+  1. Set `CLIENT_IP_HEADER=cf-connecting-ip` so rate limiting keys on the real client IP (supported since 2026-10-28; unset keeps the first `X-Forwarded-For` entry, which a client may spoof depending on the reverse proxy).
   2. Block direct access to the origin: Cloudflare Tunnel (preferred, no open ports) or a firewall allowing only Cloudflare IP ranges.
   3. Do not enable Bot Fight Mode or challenges on `/api/*` — the extensions, ChatGPT and Codex cannot solve them.
   4. SSL mode "Full (strict)". Proxied requests time out at 100 s (524).
@@ -122,7 +122,7 @@ Decision: keep the VPS (no per-request subrequest or CPU limits, in-memory cache
 3. [x] Extract the analysis/lookup service; Zod only for MCP (REST contract unchanged).
 4. [x] Add stateless `/api/mcp` with `get_package_info` and `analyze_dependencies` and a dedicated rate limit; tested with v1 and v2 MCP clients.
 5. [ ] Deploy and verify in production with `codex mcp add` / `claude mcp add` and MCP Inspector.
-6. [ ] Cloudflare in front of the VPS (section 7), including the `CF-Connecting-IP` change.
+6. [ ] Cloudflare in front of the VPS (section 7), with `CLIENT_IP_HEADER=cf-connecting-ip`.
 7. [ ] Add `search` / `fetch` tools; test in ChatGPT Developer Mode.
 8. [ ] Auth: API keys first, OAuth (CIMD/DCR) if publishing requires it.
 9. [ ] Package as a ChatGPT/Codex plugin (MCP + skill); optional UI widget.

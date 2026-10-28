@@ -29,6 +29,13 @@ exports[`GET /api/analyze-packages > returns the API description document 1`] = 
           "pubspec.yaml (Dart/Flutter)",
         ],
       },
+      "POST /api/mcp": {
+        "description": "Model Context Protocol server (Streamable HTTP) for AI agents",
+        "tools": [
+          "analyze_dependencies",
+          "get_package_info",
+        ],
+      },
     },
     "links": {
       "api": "https://api.depman.cloud",

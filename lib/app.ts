@@ -1,5 +1,6 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import {
 	analyzeManifest,
@@ -48,7 +49,7 @@ app.get("/health", (c) =>
 app.get("/analyze-packages", (c) => {
 	return c.json({
 		name: "Dep-Man — Dependency Manager API",
-		version: "0.2.0",
+		version: packageJson.version,
 		status: "operational",
 		description:
 			"Analyze package dependencies and check for outdated packages across multiple package managers.",
@@ -78,6 +79,11 @@ app.get("/analyze-packages", (c) => {
 					current: "string (optional) - Current version to compare",
 				},
 			},
+			"POST /api/mcp": {
+				description:
+					"Model Context Protocol server (Streamable HTTP) for AI agents",
+				tools: ["analyze_dependencies", "get_package_info"],
+			},
 		},
 		links: {
 			api: "https://api.depman.cloud",
@@ -103,13 +109,15 @@ function handleServerError(
 	return c.json({ error: message }, 500);
 }
 
-app.post("/analyze-packages", async (c) => {
-	try {
-		const contentLength = c.req.header("content-length");
-		if (contentLength && parseInt(contentLength, 10) > MAX_CONTENT_SIZE) {
-			return c.json({ error: "Payload too large (max 5MB)" }, 413);
-		}
+// Enforces the size limit while streaming, so a chunked body without a
+// Content-Length header can't make the server buffer an unbounded payload.
+const analyzeBodyLimit = bodyLimit({
+	maxSize: MAX_CONTENT_SIZE,
+	onError: (c) => c.json({ error: "Payload too large (max 5MB)" }, 413),
+});
 
+app.post("/analyze-packages", analyzeBodyLimit, async (c) => {
+	try {
 		// Parsed regardless of Content-Type: production clients rely on it.
 		const body = await c.req.json();
 		const { content, fileName } = body;
